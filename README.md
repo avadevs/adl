@@ -61,4 +61,5 @@ TBD.
 1. [ ] Built more applications with this library to make it more battle tested.
 2. [ ] Ditch the raylib dependency. I want this library to enable you to use the renderer and input system of your choice.
 3. [ ] Abstract `input.zig` further so it does not rely directly on raylib. Instead we should do it like clay where each developer can bring their renderer (for us: input manager) of choice.
-4. [ ] ...
+4. [ ] Use the clay terminal renderer for tests.
+5. [ ] ...
