@@ -251,6 +251,72 @@ fn testScreenDeinit(state: *anyopaque, context: ?*anyopaque) void {
     std.log.debug("Deinit screen called", .{});
 }
 
+// --- Test Infrastructure for checking context ---
+var g_last_screen_context: ?*anyopaque = null;
+
+fn testScreenWithContextInit(allocator: std.mem.Allocator, context: ?*anyopaque) anyerror!ScreenInstance {
+    g_last_screen_context = context;
+    const screen_state = try allocator.create(TestScreen);
+    screen_state.* = .{ .allocator = allocator, .message = "Context Test" };
+    return ScreenInstance{
+        .state = screen_state,
+        .context = null,
+        .vtable = &TEST_SCREEN_WITH_CONTEXT_VTABLE,
+    };
+}
+
+const TEST_SCREEN_WITH_CONTEXT_VTABLE = ScreenVTable{
+    .init = testScreenWithContextInit,
+    .render = testScreenRender,
+    .deinit = testScreenDeinit,
+};
+
+// --- Test Infrastructure for lifecycle and state ---
+const LifecycleTestScreen = struct {
+    allocator: std.mem.Allocator,
+    init_count: u32,
+    message: []const u8,
+};
+
+var g_init_call_count: u32 = 0;
+
+fn lifecycleScreenInit(allocator: std.mem.Allocator, context: ?*anyopaque) anyerror!ScreenInstance {
+    _ = context;
+    g_init_call_count += 1;
+    const screen_state = try allocator.create(LifecycleTestScreen);
+    screen_state.* = .{
+        .allocator = allocator,
+        .init_count = g_init_call_count,
+        .message = "Lifecycle Test",
+    };
+    return ScreenInstance{ .state = screen_state, .context = null, .vtable = &LIFECYCLE_SCREEN_VTABLE };
+}
+
+fn lifecycleScreenDeinit(state: *anyopaque, context: ?*anyopaque) void {
+    _ = context;
+    const screen_state: *LifecycleTestScreen = @ptrCast(@alignCast(state));
+    screen_state.allocator.destroy(screen_state);
+}
+
+const LIFECYCLE_SCREEN_VTABLE = ScreenVTable{
+    .init = lifecycleScreenInit,
+    .render = testScreenRender, // Render is not important for this test
+    .deinit = lifecycleScreenDeinit,
+};
+
+// --- Test Infrastructure for creation failure ---
+fn failingScreenInit(allocator: std.mem.Allocator, context: ?*anyopaque) anyerror!ScreenInstance {
+    _ = allocator;
+    _ = context;
+    return error.TestScreenInitFailed;
+}
+
+const FAILING_SCREEN_VTABLE = ScreenVTable{
+    .init = failingScreenInit,
+    .render = testScreenRender,
+    .deinit = testScreenDeinit,
+};
+
 // --- The single, constant VTable for TestScreen ---
 const TEST_SCREEN_VTABLE = ScreenVTable{
     .init = testScreenInit,
@@ -311,6 +377,305 @@ test "router route" {
     try std.testing.expectEqual(@as(usize, 2), router.history.items.len);
     try std.testing.expectEqualSlices(u8, "/hello/zig", router.history.items[1]);
     try std.testing.expectEqual(@as(usize, 1), router.history_index);
+}
+
+test "route: simple static route" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url = try URL.init(allocator, "/home");
+    const route: Route = .{ .url = url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } };
+    try router.routes.append(router.allocator, route);
+
+    try router.route("/home");
+
+    try std.testing.expectEqual(@as(usize, 1), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/home", router.history.items[0]);
+    try std.testing.expectEqual(@as(usize, 0), router.history_index);
+}
+
+test "route: simple dynamic route" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url = try URL.init(allocator, "/users/:id");
+    const route: Route = .{ .url = url, .screen = .{ .vtable = &TEST_SCREEN_WITH_CONTEXT_VTABLE, .state = null, .context = null } };
+    try router.routes.append(router.allocator, route);
+
+    try router.route("/users/123");
+
+    try std.testing.expectEqual(@as(usize, 1), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/users/123", router.history.items[0]);
+
+    const context: *const std.ArrayList([]const u8) = @ptrCast(@alignCast(g_last_screen_context.?));
+    try std.testing.expectEqual(@as(usize, 1), context.items.len);
+    try std.testing.expectEqualSlices(u8, "123", context.items[0]);
+}
+
+test "route: sequential routing" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_b = try URL.init(allocator, "/b");
+    try router.routes.append(router.allocator, .{ .url = url_b, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_c = try URL.init(allocator, "/c");
+    try router.routes.append(router.allocator, .{ .url = url_c, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/b");
+    try router.route("/c");
+
+    try std.testing.expectEqual(@as(usize, 3), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/a", router.history.items[0]);
+    try std.testing.expectEqualSlices(u8, "/b", router.history.items[1]);
+    try std.testing.expectEqualSlices(u8, "/c", router.history.items[2]);
+    try std.testing.expectEqual(@as(usize, 2), router.history_index);
+}
+
+test "route: not found" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url = try URL.init(allocator, "/home");
+    try router.routes.append(router.allocator, .{ .url = url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try std.testing.expectError(Router.RouteError.RouteNotFound, router.route("/does-not-exist"));
+}
+
+test "route: static preferred over dynamic" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const static_url = try URL.init(allocator, "/users/view");
+    try router.routes.append(router.allocator, .{ .url = static_url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    const dynamic_url = try URL.init(allocator, "/users/:id");
+    try router.routes.append(router.allocator, .{ .url = dynamic_url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/users/view");
+
+    var static_route_state: ?*anyopaque = null;
+    var dynamic_route_state: ?*anyopaque = null;
+    for (router.routes.items) |r| {
+        if (std.mem.eql(u8, r.url.template, "/users/view")) {
+            static_route_state = r.screen.state;
+        } else if (std.mem.eql(u8, r.url.template, "/users/:id")) {
+            dynamic_route_state = r.screen.state;
+        }
+    }
+
+    try std.testing.expect(static_route_state != null);
+    try std.testing.expect(dynamic_route_state == null);
+}
+
+test "route: more specific dynamic preferred" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const more_specific_url = try URL.init(allocator, "/users/:id/profile"); // 1 param
+    try router.routes.append(router.allocator, .{ .url = more_specific_url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    const less_specific_url = try URL.init(allocator, "/users/:id/:page"); // 2 params
+    try router.routes.append(router.allocator, .{ .url = less_specific_url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/users/123/profile");
+
+    var more_specific_state: ?*anyopaque = null;
+    var less_specific_state: ?*anyopaque = null;
+    for (router.routes.items) |r| {
+        if (std.mem.eql(u8, r.url.template, "/users/:id/profile")) {
+            more_specific_state = r.screen.state;
+        } else if (std.mem.eql(u8, r.url.template, "/users/:id/:page")) {
+            less_specific_state = r.screen.state;
+        }
+    }
+
+    try std.testing.expect(more_specific_state != null);
+    try std.testing.expect(less_specific_state == null);
+}
+
+test "route: competing routes error" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const template1 = try URL.init(allocator, "/:entity/:id");
+    try router.routes.append(router.allocator, .{ .url = template1, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    const template2 = try URL.init(allocator, "/:type/:name");
+    try router.routes.append(router.allocator, .{ .url = template2, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try std.testing.expectError(Router.RouteError.CompetingRoutes, router.route("/products/123"));
+}
+
+test "route: state preservation and init once" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    g_init_call_count = 0;
+
+    const url = try URL.init(allocator, "/lifecycle");
+    try router.routes.append(router.allocator, .{ .url = url, .screen = .{ .vtable = &LIFECYCLE_SCREEN_VTABLE, .state = null, .context = null } });
+
+    // First route, should init
+    try router.route("/lifecycle");
+    try std.testing.expectEqual(@as(u32, 1), g_init_call_count);
+
+    // Check that the state was stored
+    const route1 = &router.routes.items[0];
+    try std.testing.expect(route1.screen.state != null);
+    const screen1: *LifecycleTestScreen = @ptrCast(@alignCast(route1.screen.state.?));
+    try std.testing.expectEqual(@as(u32, 1), screen1.init_count);
+
+    // Route to a different page (we need to register it first)
+    const other_url = try URL.init(allocator, "/other");
+    try router.routes.append(router.allocator, .{ .url = other_url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    try router.route("/other");
+
+    // Route back to the lifecycle page
+    try router.route("/lifecycle");
+
+    // Assert init was NOT called again
+    try std.testing.expectEqual(@as(u32, 1), g_init_call_count);
+
+    // And the state is the same
+    const route2 = &router.routes.items[0];
+    const screen2: *LifecycleTestScreen = @ptrCast(@alignCast(route2.screen.state.?));
+    try std.testing.expect(screen1 == screen2); // Check pointer equality
+}
+
+test "route: screen creation failure" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url = try URL.init(allocator, "/fail");
+    try router.routes.append(router.allocator, .{ .url = url, .screen = .{ .vtable = &FAILING_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try std.testing.expectError(error.ScreenCreationFailure, router.route("/fail"));
+
+    // Also assert that history was not updated
+    try std.testing.expectEqual(@as(usize, 0), router.history.items.len);
+}
+
+test "route: forward history truncation" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_b = try URL.init(allocator, "/b");
+    try router.routes.append(router.allocator, .{ .url = url_b, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_c = try URL.init(allocator, "/c");
+    try router.routes.append(router.allocator, .{ .url = url_c, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_d = try URL.init(allocator, "/d");
+    try router.routes.append(router.allocator, .{ .url = url_d, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/b");
+    try router.route("/c");
+
+    // History is ["/a", "/b", "/c"], index is 2
+    try std.testing.expectEqual(@as(usize, 3), router.history.items.len);
+    try std.testing.expectEqual(@as(usize, 2), router.history_index);
+
+    // Manually navigate back by changing the index
+    router.history_index = 1; // Pointing at "/b"
+
+    // Route to a new page
+    try router.route("/d");
+
+    // History should now be ["/a", "/b", "/d"]
+    try std.testing.expectEqual(@as(usize, 3), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/a", router.history.items[0]);
+    try std.testing.expectEqualSlices(u8, "/b", router.history.items[1]);
+    try std.testing.expectEqualSlices(u8, "/d", router.history.items[2]);
+    try std.testing.expectEqual(@as(usize, 2), router.history_index);
+}
+
+test "route: to same url twice" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/a");
+
+    try std.testing.expectEqual(@as(usize, 2), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/a", router.history.items[0]);
+    try std.testing.expectEqualSlices(u8, "/a", router.history.items[1]);
+    try std.testing.expectEqual(@as(usize, 1), router.history_index);
+}
+
+test "route: empty url" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url = try URL.init(allocator, "");
+    try router.routes.append(router.allocator, .{ .url = url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("");
+    try std.testing.expectEqual(@as(usize, 1), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "", router.history.items[0]);
+}
+
+test "route: root url" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url = try URL.init(allocator, "/");
+    try router.routes.append(router.allocator, .{ .url = url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/");
+    try std.testing.expectEqual(@as(usize, 1), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/", router.history.items[0]);
+}
+
+test "route: url with extra slashes" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url = try URL.init(allocator, "/a//:b/");
+    try router.routes.append(router.allocator, .{ .url = url, .screen = .{ .vtable = &TEST_SCREEN_WITH_CONTEXT_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a//foo/");
+
+    try std.testing.expectEqual(@as(usize, 1), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/a//foo/", router.history.items[0]);
+
+    const context: *const std.ArrayList([]const u8) = @ptrCast(@alignCast(g_last_screen_context.?));
+    try std.testing.expectEqual(@as(usize, 1), context.items.len);
+    try std.testing.expectEqualSlices(u8, "foo", context.items[0]);
+}
+
+test "route: out of memory on history duplication" {
+    var fa = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 5 });
+    const allocator = fa.allocator();
+
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url = try URL.init(allocator, "/a");
+    try router.routes.append(allocator, .{ .url = url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try std.testing.expectError(Router.RouteError.OutOfMemory, router.route("/a"));
+    try std.testing.expectEqual(@as(usize, 0), router.history.items.len);
 }
 
 /// URL type to make the router url based.
