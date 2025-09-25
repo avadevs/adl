@@ -5,7 +5,7 @@ const std = @import("std");
 
 pub const ScreenVTable = struct {
     /// Should return a pointer to an screen state, will be saved in a ScreenInstance.
-    init: *const fn (allocator: std.mem.Allocator, context: ?*anyopaque) ScreenInstance,
+    init: *const fn (allocator: std.mem.Allocator, context: ?*anyopaque) anyerror!ScreenInstance,
 
     // Called to render the screen
     render: *const fn (state: *anyopaque, context: ?*anyopaque) void,
@@ -31,9 +31,8 @@ pub const Router = struct {
     /// The routes save the possible URLs and their respective screens.
     routes: std.ArrayList(Route),
 
-    // Saves an array of strings that represent the urls the user entered.
-    // Has a static size that get set when initializing the router.
-    history: [][]u8,
+    /// Saves an array of strings that represent the urls the user entered.
+    history: std.ArrayList([]u8),
 
     /// The active screen in the history.
     history_index: usize = 0,
@@ -42,16 +41,108 @@ pub const Router = struct {
         return .{
             .allocator = allocator,
             .routes = try std.ArrayList(Route).initCapacity(allocator, 16),
-            .history = try allocator.alloc([]u8, history_size),
+            .history = try std.ArrayList([]u8).initCapacity(allocator, history_size),
         };
     }
 
+    /// Deinitializes the router and all active screens that the router managed.
+    /// You need to take care of the memory of the context object that was used in the functions of the screen.
     fn deinit(self: *Router) void {
-        self.allocator.free(self.history);
+        // deinit history
+        for (self.history.items) |url| {
+            self.allocator.free(url);
+        }
+        self.history.deinit(self.allocator);
+
+        // deinit all active states
+        for (self.routes.items) |*r| {
+            if (r.screen.state) |state| {
+                r.screen.vtable.deinit(state, r.screen.context);
+            }
+        }
+
+        // deinit all urls in routes
+        for (self.routes.items) |*r| {
+            r.url.deinit();
+        }
+
         self.routes.deinit(self.allocator);
     }
 
-    // fn route(self: *Router, url: []const u8) void {}
+    pub const RouteError = error{
+        RouteNotFound,
+        CompetingRoutes,
+        ScreenCreationFailure,
+        OutOfMemory,
+    };
+
+    fn route(self: *Router, url_str: []const u8) RouteError!void {
+        var possible_routes = try std.ArrayList(*Route).initCapacity(self.allocator, self.routes.items.len);
+        defer possible_routes.deinit(self.allocator);
+
+        // Save all routes that did match
+        for (0..self.routes.items.len) |i| {
+            var r = &self.routes.items[i];
+            // The parse function can fail, but that just means it's not a match.
+            // We use `if` with an `else |_| {}` to ignore the error.
+            if (r.url.parse(url_str)) |_| {
+                try possible_routes.append(self.allocator, r);
+            } else |_| {}
+        }
+
+        if (possible_routes.items.len == 0) return error.RouteNotFound;
+
+        var exact_route: *Route = possible_routes.items[0];
+
+        if (possible_routes.items.len > 1) {
+            // If multiple routes match we need to select the most specific one
+            // this means the route with the least amount of parsed dynamic data.
+            for (possible_routes.items[1..]) |r| {
+                if (r.url.parsed_dynamic.items.len < exact_route.url.parsed_dynamic.items.len) {
+                    exact_route = r;
+                }
+            }
+
+            // Now check if there are other routes with the same level of specificity.
+            var competing_found = false;
+            for (possible_routes.items) |r| {
+                if (r != exact_route and r.url.parsed_dynamic.items.len == exact_route.url.parsed_dynamic.items.len) {
+                    competing_found = true;
+                    break;
+                }
+            }
+            if (competing_found) return error.CompetingRoutes;
+        }
+
+        // Initialize the new screen if needed
+        const screen_context = &exact_route.url.parsed_dynamic;
+        if (exact_route.screen.state == null) {
+            const new_screen = exact_route.screen.vtable.init(self.allocator, screen_context) catch |err| {
+                std.log.err("failed to create screen: {any}", .{err});
+                return error.ScreenCreationFailure;
+            };
+
+            exact_route.screen = new_screen;
+        }
+
+        // --- History Management ---
+
+        // If we are navigating from within the history, we truncate the forward history.
+        if (self.history.items.len > 0 and self.history_index < self.history.items.len - 1) {
+            for (self.history.items[self.history_index + 1 ..]) |url_to_free| {
+                self.allocator.free(url_to_free);
+            }
+            self.history.shrinkRetainingCapacity(self.history_index + 1);
+        }
+
+        // Add new url to history
+        const dupe_url = try self.allocator.dupe(u8, url_str);
+        self.history.append(self.allocator, dupe_url) catch {
+            self.allocator.free(dupe_url);
+            return error.OutOfMemory;
+        };
+        self.history_index = self.history.items.len - 1;
+    }
 
     // fn back(self: *Router) bool {
     //     if (self.history_index > 0) {
@@ -71,7 +162,7 @@ pub const Router = struct {
     //     return false;
     // }
 
-    /// Adds new screen on the stack. Call .forward() to navigate to it
+    // Adds new screen on the stack. Call .forward() to navigate to it
     // fn appendScreen(self: *Router, screen: ScreenInstance) bool {
     //     self.history.append(self.allocator, screen) catch |err| {
     //         std.log.warn("Could not add screen to router: {any}", .{err});
@@ -81,19 +172,20 @@ pub const Router = struct {
     //     return true;
     // }
 
-    /// Removes the last (most upper) screen.
-    /// Expects one screen to exist after removal.
-    fn popScreen(self: *Router) bool {
-        const start_index = self.history_index;
-        if (self.history.items.len <= 1) return false; // We can only pop a screen if we have one and expect there to be one screen afterwards too.
+    // Removes the last (most upper) screen.
+    // Expects one screen to exist after removal.
+    // TODO: This function needs to be re-evaluated. The history now stores URLs,
+    // not ScreenInstances. The concept of "popping a screen" needs to be
+    // reconciled with a URL-based history (e.g., by navigating to the previous URL).
+    // fn popScreen(self: *Router) bool {
+    //     const start_index = self.history_index;
+    //     if (self.history.items.len <= 1) return false;
 
-        // Navigate index back if we are displaying the last screen
-        if (self.history_index == self.history.items.len - 1) self.back();
+    //     if (self.history_index == self.history.items.len - 1) self.back();
 
-        // Deinitialize screen that got popped
-        const screen = self.history.items[start_index];
-        screen.vtable.deinit(screen.state, screen.context);
-    }
+    //     const screen = self.history.items[start_index];
+    //     screen.vtable.deinit(screen.state, screen.context);
+    // }
 
     // /// Navigate to a specific index in the history
     // fn navigateTo(self: *Router, index: usize) bool {
@@ -122,17 +214,18 @@ pub const Router = struct {
 
 // --- Test Screen Definition ---
 const TestScreen = struct {
+    allocator: std.mem.Allocator, // save the allocator to deinit on demand
     message: []const u8,
 };
 
 // --- VTable Functions (defined at the top-level) ---
-fn testScreenInit(allocator: std.mem.Allocator, context: ?*anyopaque) ScreenInstance {
+fn testScreenInit(allocator: std.mem.Allocator, context: ?*anyopaque) anyerror!ScreenInstance {
     // In a real app, 'context' might be the parsed URL params.
     _ = context;
 
     // 1. Allocate the actual state for our screen on the heap.
-    const screen_state = allocator.create(TestScreen) catch @panic("failed to alloc");
-    screen_state.* = .{ .message = "Hello World" };
+    const screen_state = try allocator.create(TestScreen);
+    screen_state.* = .{ .allocator = allocator, .message = "Hello World" };
 
     // 2. Return a type-erased ScreenInstance.
     return ScreenInstance{
@@ -150,10 +243,11 @@ fn testScreenRender(state: *anyopaque, context: ?*anyopaque) void {
 }
 
 fn testScreenDeinit(state: *anyopaque, context: ?*anyopaque) void {
-    // This function would free the state, but in a test with a leaking
-    // allocator, we can leave it empty to simplify the example.
-    _ = state;
     _ = context;
+
+    const screen_state: *TestScreen = @ptrCast(@alignCast(state));
+    screen_state.allocator.destroy(screen_state);
+
     std.log.debug("Deinit screen called", .{});
 }
 
@@ -164,29 +258,59 @@ const TEST_SCREEN_VTABLE = ScreenVTable{
     .deinit = testScreenDeinit,
 };
 
-test "router vtable usage" {
+test "router construct" {
     const allocator = std.testing.allocator;
 
-    // In a real router, you would associate a URL template with a vtable.
-    // For this test, we'll just use the vtable directly to create a screen.
-    const vtable = &TEST_SCREEN_VTABLE;
+    var router = try Router.init(allocator, 64);
+    defer router.deinit();
 
-    var url = try URL.init(allocator, "/hello/world");
-    defer url.deinit();
+    const url = try URL.init(allocator, "/hello/world");
+    // The URL is moved into the routes list, the list is responsible for deinit
+    // defer url.deinit();
 
     const route: Route = .{
         .url = url,
         .screen = .{
             .context = null,
             .state = null,
-            .vtable = vtable,
+            .vtable = &TEST_SCREEN_VTABLE,
         },
     };
+
+    try router.routes.append(router.allocator, route);
+}
+
+test "router route" {
+    const allocator = std.testing.allocator;
 
     var router = try Router.init(allocator, 64);
     defer router.deinit();
 
-    try router.routes.append(router.allocator, route);
+    const url1 = try URL.init(allocator, "/hello/:name");
+    const route1: Route = .{
+        .url = url1,
+        .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null },
+    };
+    try router.routes.append(router.allocator, route1);
+
+    const url2 = try URL.init(allocator, "/hello/world");
+    const route2: Route = .{
+        .url = url2,
+        .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null },
+    };
+    try router.routes.append(router.allocator, route2);
+
+    try router.route("/hello/world");
+
+    try std.testing.expectEqual(@as(usize, 1), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/hello/world", router.history.items[0]);
+    try std.testing.expectEqual(@as(usize, 0), router.history_index);
+
+    // Route to a new url
+    try router.route("/hello/zig");
+    try std.testing.expectEqual(@as(usize, 2), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/hello/zig", router.history.items[1]);
+    try std.testing.expectEqual(@as(usize, 1), router.history_index);
 }
 
 /// URL type to make the router url based.
