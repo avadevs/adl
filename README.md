@@ -47,9 +47,10 @@ The library is organized by architectural role to make it easy to understand and
 
 -   `jobs.zig` A job scheduling solution built on top of [zjobs](https://github.com/zig-gamedev/zjobs) that allows us to pass the result of the jobs back to callback functions.
 
--   `navigator.zig` A navigator / router that allows screen management.
-
 -   `store.zig` A component that allows you to store a piece of memory and is accessable by multiple threads (uses RwLock to synchronize).
+
+-   `router.zig` A router that simplifies screen management. It is url based like in web development.
+
 
 ## Usage
 
