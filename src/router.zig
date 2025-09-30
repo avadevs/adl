@@ -182,7 +182,7 @@ pub const Router = struct {
 
     /// If you used the .back() function you can use .forward()
     pub fn forward(self: *Router) bool {
-        if (self.history_index < self.history.len - 1 and self.history.items.len > 0) {
+        if (self.history.items.len > 0 and self.history_index < self.history.items.len - 1) {
             self.history_index += 1;
 
             const url_str = self.history.items[self.history_index];
