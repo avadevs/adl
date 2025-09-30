@@ -29,12 +29,14 @@ pub const Router = struct {
     allocator: std.mem.Allocator,
 
     /// The routes save the possible URLs and their respective screens.
+    /// These are the tempates that can be triggered by a concrete URL the user
+    /// will enter into the system.
     routes: std.ArrayList(Route),
 
-    /// Saves an array of strings that represent the urls the user entered.
+    /// The URLs the user entered into the system.
     history: std.ArrayList([]u8),
 
-    /// The active screen in the history.
+    /// The active url in the history.
     history_index: usize = 0,
 
     fn init(allocator: std.mem.Allocator, history_size: usize) !Router {
@@ -77,6 +79,39 @@ pub const Router = struct {
     };
 
     fn route(self: *Router, url_str: []const u8) RouteError!void {
+        const exact_route = try self.findRoute(url_str);
+
+        // Initialize the new screen if needed
+        const screen_context = &exact_route.url.parsed_dynamic;
+        if (exact_route.screen.state == null) {
+            const new_screen = exact_route.screen.vtable.init(self.allocator, screen_context) catch |err| {
+                std.log.err("failed to create screen: {any}", .{err});
+                return error.ScreenCreationFailure;
+            };
+
+            exact_route.screen = new_screen;
+        }
+
+        // --- History Management ---
+
+        // If we are navigating from within the history, we truncate the forward history.
+        if (self.history.items.len > 0 and self.history_index < self.history.items.len - 1) {
+            for (self.history.items[self.history_index + 1 ..]) |url_to_free| {
+                self.allocator.free(url_to_free);
+            }
+            self.history.shrinkRetainingCapacity(self.history_index + 1);
+        }
+
+        // Add new url to history
+        const dupe_url = try self.allocator.dupe(u8, url_str);
+        self.history.append(self.allocator, dupe_url) catch {
+            self.allocator.free(dupe_url);
+            return error.OutOfMemory;
+        };
+        self.history_index = self.history.items.len - 1;
+    }
+
+    fn findRoute(self: *Router, url_str: []const u8) RouteError!*Route {
         var possible_routes = try std.ArrayList(*Route).initCapacity(self.allocator, self.routes.items.len);
         defer possible_routes.deinit(self.allocator);
 
@@ -114,102 +149,42 @@ pub const Router = struct {
             if (competing_found) return error.CompetingRoutes;
         }
 
-        // Initialize the new screen if needed
-        const screen_context = &exact_route.url.parsed_dynamic;
-        if (exact_route.screen.state == null) {
-            const new_screen = exact_route.screen.vtable.init(self.allocator, screen_context) catch |err| {
-                std.log.err("failed to create screen: {any}", .{err});
-                return error.ScreenCreationFailure;
-            };
-
-            exact_route.screen = new_screen;
-        }
-
-        // --- History Management ---
-
-        // If we are navigating from within the history, we truncate the forward history.
-        if (self.history.items.len > 0 and self.history_index < self.history.items.len - 1) {
-            for (self.history.items[self.history_index + 1 ..]) |url_to_free| {
-                self.allocator.free(url_to_free);
-            }
-            self.history.shrinkRetainingCapacity(self.history_index + 1);
-        }
-
-        // Add new url to history
-        const dupe_url = try self.allocator.dupe(u8, url_str);
-        self.history.append(self.allocator, dupe_url) catch {
-            self.allocator.free(dupe_url);
-            return error.OutOfMemory;
-        };
-        self.history_index = self.history.items.len - 1;
+        return exact_route;
     }
 
-    // fn back(self: *Router) bool {
-    //     if (self.history_index > 0) {
-    //         self.history_index -= 1;
-    //         return true;
-    //     }
+    /// Go back to the last URL.
+    fn back(self: *Router) bool {
+        if (self.history_index > 0) {
+            self.history_index -= 1;
 
-    //     return false;
-    // }
+            const url_str = self.history.items[self.history_index];
+            _ = self.findRoute(url_str) catch |err| {
+                std.log.err("Could not find route for history url {s}: {any}", .{ url_str, err });
+                return false;
+            };
 
-    // fn forward(self: *Router) bool {
-    //     if (self.history_index < self.history.len() - 1) {
-    //         self.history_index += 1;
-    //         return true;
-    //     }
+            return true;
+        }
 
-    //     return false;
-    // }
+        return false;
+    }
 
-    // Adds new screen on the stack. Call .forward() to navigate to it
-    // fn appendScreen(self: *Router, screen: ScreenInstance) bool {
-    //     self.history.append(self.allocator, screen) catch |err| {
-    //         std.log.warn("Could not add screen to router: {any}", .{err});
-    //         return false;
-    //     };
+    /// If you used the .back() function you can use .forward()
+    fn forward(self: *Router) bool {
+        if (self.history_index < self.history.len - 1 and self.history.items.len > 0) {
+            self.history_index += 1;
 
-    //     return true;
-    // }
+            const url_str = self.history.items[self.history_index];
+            _ = self.findRoute(url_str) catch |err| {
+                std.log.err("Could not find route for history url {s}: {any}", .{ url_str, err });
+                return false;
+            };
 
-    // Removes the last (most upper) screen.
-    // Expects one screen to exist after removal.
-    // TODO: This function needs to be re-evaluated. The history now stores URLs,
-    // not ScreenInstances. The concept of "popping a screen" needs to be
-    // reconciled with a URL-based history (e.g., by navigating to the previous URL).
-    // fn popScreen(self: *Router) bool {
-    //     const start_index = self.history_index;
-    //     if (self.history.items.len <= 1) return false;
+            return true;
+        }
 
-    //     if (self.history_index == self.history.items.len - 1) self.back();
-
-    //     const screen = self.history.items[start_index];
-    //     screen.vtable.deinit(screen.state, screen.context);
-    // }
-
-    // /// Navigate to a specific index in the history
-    // fn navigateTo(self: *Router, index: usize) bool {
-    //     if (index < self.history.len()) {
-    //         self.history_index = index;
-    //         return true;
-    //     }
-
-    //     return false;
-    // }
-
-    // /// Navigates to a screen in the history by relative position.
-    // /// E.g. go back 1 screen, go forward two screens).
-    // fn navigate(self: *Router, pos: isize) bool {
-    //     const new_index: isize = self.history_index + pos;
-    //     if (new_index < 0) return false; // new index must be 0 or greater
-
-    //     if (new_index < self.history.len()) {
-    //         self.history_index = new_index;
-    //         return true;
-    //     }
-
-    //     return false;
-    // }
+        return false;
+    }
 };
 
 // --- Test Screen Definition ---
