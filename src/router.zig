@@ -664,6 +664,219 @@ test "route: out of memory on history duplication" {
     try std.testing.expectEqual(@as(usize, 0), router.history.items.len);
 }
 
+test "back: basic navigation" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_b = try URL.init(allocator, "/b");
+    try router.routes.append(router.allocator, .{ .url = url_b, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_c = try URL.init(allocator, "/c");
+    try router.routes.append(router.allocator, .{ .url = url_c, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/b");
+    try router.route("/c");
+
+    try std.testing.expect(router.back());
+    try std.testing.expectEqual(@as(usize, 1), router.history_index);
+    try std.testing.expectEqualSlices(u8, "/b", router.history.items[router.history_index]);
+}
+
+test "back: at beginning of history" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+
+    try std.testing.expect(!router.back());
+    try std.testing.expectEqual(@as(usize, 0), router.history_index);
+}
+
+test "back: multiple steps" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_b = try URL.init(allocator, "/b");
+    try router.routes.append(router.allocator, .{ .url = url_b, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_c = try URL.init(allocator, "/c");
+    try router.routes.append(router.allocator, .{ .url = url_c, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/b");
+    try router.route("/c");
+
+    try std.testing.expect(router.back()); // -> /b
+    try std.testing.expect(router.back()); // -> /a
+    try std.testing.expectEqual(@as(usize, 0), router.history_index);
+    try std.testing.expectEqualSlices(u8, "/a", router.history.items[router.history_index]);
+
+    try std.testing.expect(!router.back());
+    try std.testing.expectEqual(@as(usize, 0), router.history_index);
+}
+
+test "forward: basic navigation" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_b = try URL.init(allocator, "/b");
+    try router.routes.append(router.allocator, .{ .url = url_b, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_c = try URL.init(allocator, "/c");
+    try router.routes.append(router.allocator, .{ .url = url_c, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/b");
+    try router.route("/c");
+
+    _ = router.back(); // -> /b
+
+    try std.testing.expect(router.forward());
+    try std.testing.expectEqual(@as(usize, 2), router.history_index);
+    try std.testing.expectEqualSlices(u8, "/c", router.history.items[router.history_index]);
+}
+
+test "forward: at end of history" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_b = try URL.init(allocator, "/b");
+    try router.routes.append(router.allocator, .{ .url = url_b, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/b");
+
+    try std.testing.expect(!router.forward());
+    try std.testing.expectEqual(@as(usize, 1), router.history_index);
+}
+
+test "forward: multiple steps" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_b = try URL.init(allocator, "/b");
+    try router.routes.append(router.allocator, .{ .url = url_b, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_c = try URL.init(allocator, "/c");
+    try router.routes.append(router.allocator, .{ .url = url_c, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_d = try URL.init(allocator, "/d");
+    try router.routes.append(router.allocator, .{ .url = url_d, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/b");
+    try router.route("/c");
+    try router.route("/d");
+
+    _ = router.back(); // -> /c
+    _ = router.back(); // -> /b
+    _ = router.back(); // -> /a
+
+    try std.testing.expect(router.forward()); // -> /b
+    try std.testing.expect(router.forward()); // -> /c
+    try std.testing.expectEqual(@as(usize, 2), router.history_index);
+    try std.testing.expectEqualSlices(u8, "/c", router.history.items[router.history_index]);
+}
+
+test "back and forward: alternating navigation" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_b = try URL.init(allocator, "/b");
+    try router.routes.append(router.allocator, .{ .url = url_b, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_c = try URL.init(allocator, "/c");
+    try router.routes.append(router.allocator, .{ .url = url_c, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/b");
+    try router.route("/c");
+
+    try std.testing.expect(router.back()); // -> /b
+    try std.testing.expectEqual(@as(usize, 1), router.history_index);
+
+    try std.testing.expect(router.back()); // -> /a
+    try std.testing.expectEqual(@as(usize, 0), router.history_index);
+
+    try std.testing.expect(router.forward()); // -> /b
+    try std.testing.expectEqual(@as(usize, 1), router.history_index);
+
+    try std.testing.expect(router.forward()); // -> /c
+    try std.testing.expectEqual(@as(usize, 2), router.history_index);
+
+    try std.testing.expect(!router.forward()); // (end)
+    try std.testing.expectEqual(@as(usize, 2), router.history_index);
+}
+
+test "back and forward: new route truncates forward history" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_b = try URL.init(allocator, "/b");
+    try router.routes.append(router.allocator, .{ .url = url_b, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_c = try URL.init(allocator, "/c");
+    try router.routes.append(router.allocator, .{ .url = url_c, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    const url_d = try URL.init(allocator, "/d");
+    try router.routes.append(router.allocator, .{ .url = url_d, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+    try router.route("/b");
+    try router.route("/c");
+
+    _ = router.back(); // -> /b
+
+    try router.route("/d");
+
+    try std.testing.expectEqual(@as(usize, 3), router.history.items.len);
+    try std.testing.expectEqualSlices(u8, "/d", router.history.items[2]);
+
+    try std.testing.expect(!router.forward());
+}
+
+test "back and forward: on empty history" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    try std.testing.expect(!router.back());
+    try std.testing.expect(!router.forward());
+}
+
+test "back and forward: on single-entry history" {
+    const allocator = std.testing.allocator;
+    var router = try Router.init(allocator, 16);
+    defer router.deinit();
+
+    const url_a = try URL.init(allocator, "/a");
+    try router.routes.append(router.allocator, .{ .url = url_a, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+
+    try router.route("/a");
+
+    try std.testing.expect(!router.back());
+    try std.testing.expect(!router.forward());
+    try std.testing.expectEqual(@as(usize, 0), router.history_index);
+}
+
 /// URL type to make the router url based.
 pub const URL = struct {
     const Self = @This();
