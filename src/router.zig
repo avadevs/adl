@@ -153,7 +153,7 @@ pub const Router = struct {
     }
 
     /// Go back to the last URL.
-    fn back(self: *Router) bool {
+    pub fn back(self: *Router) bool {
         if (self.history_index > 0) {
             self.history_index -= 1;
 
@@ -170,7 +170,7 @@ pub const Router = struct {
     }
 
     /// If you used the .back() function you can use .forward()
-    fn forward(self: *Router) bool {
+    pub fn forward(self: *Router) bool {
         if (self.history_index < self.history.len - 1 and self.history.items.len > 0) {
             self.history_index += 1;
 
