@@ -155,12 +155,16 @@ pub const Router = struct {
     /// Use this function to render the active screen.
     /// This will call the render function of the active screen via its vtable.
     pub fn render(self: *Router) void {
+        if (self.history.items.len == 0) return;
+
         const r = findRoute(self, self.history.items[self.history_index]) catch |err| {
             std.log.err("Could not find route. Error: {any}", .{err});
             return;
         };
 
-        r.screen.vtable.render(r.screen.state, r.url.parsed_dynamic);
+        if (r.screen.state == null) return;
+
+        r.screen.vtable.render(r.screen.state.?, &r.url.parsed_dynamic);
     }
 
     /// Go back to the last URL.
