@@ -25,7 +25,7 @@ pub fn Store(comptime T: type) type {
             return Self{
                 .allocator = allocator,
                 .state = initial_state,
-                .subscribers = std.ArrayList(Subscriber).initCapacity(allocator, 16),
+                .subscribers = try std.ArrayList(Subscriber).initCapacity(allocator, 16),
             };
         }
 
@@ -38,7 +38,7 @@ pub fn Store(comptime T: type) type {
         pub fn subscribe(self: *Self, subscriber: Subscriber) !void {
             self.lock.lock();
             defer self.lock.unlock();
-            try self.subscribers.append(subscriber);
+            try self.subscribers.append(self.allocator, subscriber);
         }
 
         /// Removes all callbacks associated with a given context pointer.
@@ -78,4 +78,76 @@ pub fn Store(comptime T: type) type {
             }
         }
     };
+}
+
+//--- Tests ---
+
+var basic_value: u64 = undefined;
+
+const ComplexStruct = struct {
+    one: u64,
+    two: u32,
+    three: i64,
+};
+var complex_value: ComplexStruct = undefined;
+
+var notification_counter: u32 = 0;
+var last_seen_state: u64 = 0;
+
+fn on_state_change(context: ?*anyopaque, state: *const u64) void {
+    _ = context;
+    notification_counter += 1;
+    last_seen_state = state.*;
+}
+
+test "store: basic usage" {
+    const allocator = std.testing.allocator;
+
+    var store = try Store(u64).init(allocator, 1);
+    defer store.deinit();
+
+    store.get(null, struct {
+        fn read_state(context: anytype, state: *const u64) void {
+            _ = context;
+            basic_value = state.*;
+        }
+    }.read_state);
+
+    try std.testing.expectEqual(basic_value, 1);
+}
+
+test "store: read struct" {
+    const allocator = std.testing.allocator;
+
+    var store = try Store(ComplexStruct).init(allocator, .{ .one = 0, .two = 1, .three = 2 });
+    defer store.deinit();
+
+    store.get(null, struct {
+        fn read_state(context: anytype, state: *const ComplexStruct) void {
+            _ = context;
+            complex_value = state.*;
+        }
+    }.read_state);
+
+    try std.testing.expectEqual(complex_value, ComplexStruct{ .one = 0, .two = 1, .three = 2 });
+}
+
+test "store: subscribe to changes" {
+    const allocator = std.testing.allocator;
+
+    var store = try Store(u64).init(allocator, 0);
+    defer store.deinit();
+
+    // Register callback
+    try store.subscribe(.{ .context = null, .callback = &on_state_change });
+
+    // This will trigger the callback
+    store.update(null, struct {
+        fn set_value(_: anytype, state: *u64) void {
+            state.* = 99;
+        }
+    }.set_value);
+
+    try std.testing.expectEqual(notification_counter, 1);
+    try std.testing.expectEqual(last_seen_state, 99);
 }
