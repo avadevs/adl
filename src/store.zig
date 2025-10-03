@@ -1,8 +1,11 @@
 const std = @import("std");
 
 /// A generic, thread-safe container for managing a piece of shared state.
-/// It allows multiple parts of an application to subscribe to state changes,
-/// ensuring that data access is safe and that the UI can react to updates.
+/// It allows multiple parts of an application to safely access and modify
+/// state from different threads.
+/// The store is meant to be read frequently so it does not provide the usuale
+/// subscribe mechanisms use might be used too, this is because this is a
+/// library for itermediate UI.
 pub fn Store(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -12,193 +15,139 @@ pub fn Store(comptime T: type) type {
         lock: std.Thread.RwLock = .{},
         state: T,
 
-        // --- Subscription Machinery ---
-        subscribers: std.ArrayList(Subscriber),
-
-        const Subscriber = struct {
-            context: ?*anyopaque,
-            callback: *const fn (context: ?*anyopaque, state: *const T) void,
-        };
-
         /// Initializes the store with an initial piece of state.
-        pub fn init(allocator: std.mem.Allocator, initial_state: T) !Self {
+        pub fn init(allocator: std.mem.Allocator, initial_state: T) Self {
             return Self{
                 .allocator = allocator,
                 .state = initial_state,
-                .subscribers = try std.ArrayList(Subscriber).initCapacity(allocator, 16),
             };
         }
 
-        /// Deinitializes the store, freeing the list of subscribers.
+        /// Deinitializes the store.
         pub fn deinit(self: *Self) void {
-            self.subscribers.deinit(self.allocator);
+            // In this simplified version, deinit is a no-op but is kept
+            // for API consistency and future compatibility.
+            _ = self;
         }
 
-        /// Registers a callback function to be called whenever the state changes.
-        pub fn subscribe(self: *Self, subscriber: Subscriber) !void {
-            self.lock.lock();
-            defer self.lock.unlock();
-            try self.subscribers.append(self.allocator, subscriber);
-        }
-
-        /// Removes all callbacks associated with a given context pointer.
-        pub fn unsubscribe(self: *Self, context_to_remove: ?*anyopaque) void {
-            self.lock.lock();
-            defer self.lock.unlock();
-
-            var i = self.subscribers.items.len;
-            while (i > 0) {
-                i -= 1;
-                if (self.subscribers.items[i].context == context_to_remove) {
-                    _ = self.subscribers.orderedRemove(i);
-                }
-            }
-        }
-
-        /// Provides safe, read-only, locked access to the state via a callback.
-        pub fn get(self: *Self, context: anytype, comptime callback: fn (ctx: anytype, state: *const T) void) void {
+        /// Provides safe, read-only, locked access to the state by calling a
+        /// method on a given instance.
+        /// The provided `method` must have the signature:
+        /// `fn(self: *TypeOf(instance), state: *const T) void`
+        pub fn with(
+            self: *Self,
+            instance: anytype,
+            comptime method: fn (@TypeOf(instance), *const T) void,
+        ) void {
             self.lock.lockShared();
             defer self.lock.unlockShared();
-            callback(context, &self.state);
+
+            @call(.auto, method, .{ instance, &self.state });
         }
 
-        /// Returns a copy of the current state. This is best for simple, copyable types.
-        /// For large or complex state, prefer using get with a callback to avoid copying.
-        /// The upside of using this method is that you do not need to mess with callbacks.
+        /// Provides safe, writeable, locked access to the state by calling a
+        /// method on a given instance.
+        /// The provided `method` must have the signature:
+        /// `fn(self: *TypeOf(instance), state: *T) void`
+        pub fn updateWith(
+            self: *Self,
+            instance: anytype,
+            comptime method: fn (@TypeOf(instance), *T) void,
+        ) void {
+            self.lock.lock();
+            defer self.lock.unlock();
+
+            @call(.auto, method, .{ instance, &self.state });
+        }
+
+        /// Returns a copy of the current state.
+        /// This is best for simple, copyable types.
         pub fn getCopy(self: *Self) T {
             self.lock.lockShared();
             defer self.lock.unlockShared();
-
             return self.state;
         }
 
-        /// Provides safe, writeable, locked access to the state via a callback.
-        /// After the callback runs, it notifies all subscribers of the change.
-        pub fn update(self: *Self, context: anytype, comptime update_fn: fn (ctx: anytype, state: *T) void) void {
-            // 1. Acquire exclusive lock for the update.
-            self.lock.lock();
-            defer self.lock.unlock();
-
-            // 2. Perform the mutation.
-            update_fn(context, &self.state);
-
-            // 3. Notify all subscribers of the change.
-            for (self.subscribers.items) |sub| {
-                sub.callback(sub.context, &self.state);
-            }
-        }
-
-        /// Overwrites the current state with a new value and notifies all subscribers.
-        /// This is most efficient for simple, copyable types. For in-place modifications
-        /// of large or complex state, prefer using update with a callback.
+        /// Overwrites the current state with a new value.
+        /// This is most efficient for simple, copyable types.
         pub fn set(self: *Self, new_state: T) void {
             self.lock.lock();
             defer self.lock.unlock();
-
             self.state = new_state;
-
-            for (self.subscribers.items) |sub| {
-                sub.callback(sub.context, &self.state);
-            }
         }
     };
 }
 
 //--- Tests ---
+const TestContext = struct {
+    read_value: u64 = 0,
+    read_two: u32 = 0,
 
-var basic_value: u64 = undefined;
+    fn read_method(self: *TestContext, state: *const u64) void {
+        self.read_value = state.*;
+    }
 
-const ComplexStruct = struct {
-    one: u64,
-    two: u32,
-    three: i64,
+    fn update_method(self: *TestContext, state: *u64) void {
+        self.read_value = 50;
+        state.* = 100;
+    }
+
+    const ComplexState = struct {
+        one: u64,
+        two: u32,
+    };
+    fn read_complex(self: *TestContext, state: *const ComplexState) void {
+        self.read_value = state.one;
+        self.read_two = state.two;
+    }
 };
-var complex_value: ComplexStruct = undefined;
 
-var notification_counter: u32 = 0;
-var last_seen_state: u64 = 0;
-
-fn on_state_change(context: ?*anyopaque, state: *const u64) void {
-    _ = context;
-    notification_counter += 1;
-    last_seen_state = state.*;
-}
-
-test "store: basic usage" {
+test "store: with" {
     const allocator = std.testing.allocator;
-
-    var store = try Store(u64).init(allocator, 1);
+    var store = Store(u64).init(allocator, 42);
     defer store.deinit();
 
-    store.get(null, struct {
-        fn read_state(context: anytype, state: *const u64) void {
-            _ = context;
-            basic_value = state.*;
-        }
-    }.read_state);
+    var ctx = TestContext{};
+    store.with(&ctx, TestContext.read_method);
 
-    try std.testing.expectEqual(basic_value, 1);
+    try std.testing.expectEqual(ctx.read_value, 42);
 }
 
-test "store: read struct" {
+test "store: updateWith" {
     const allocator = std.testing.allocator;
-
-    var store = try Store(ComplexStruct).init(allocator, .{ .one = 0, .two = 1, .three = 2 });
+    var store = Store(u64).init(allocator, 0);
     defer store.deinit();
 
-    store.get(null, struct {
-        fn read_state(context: anytype, state: *const ComplexStruct) void {
-            _ = context;
-            complex_value = state.*;
-        }
-    }.read_state);
+    var ctx = TestContext{};
+    store.updateWith(&ctx, TestContext.update_method);
 
-    try std.testing.expectEqual(complex_value, ComplexStruct{ .one = 0, .two = 1, .three = 2 });
-}
+    // Check that the method modified its own state
+    try std.testing.expectEqual(ctx.read_value, 50);
 
-test "store: subscribe to changes" {
-    const allocator = std.testing.allocator;
-
-    var store = try Store(u64).init(allocator, 0);
-    defer store.deinit();
-
-    // Register callback
-    try store.subscribe(.{ .context = null, .callback = &on_state_change });
-
-    // This will trigger the callback
-    store.update(null, struct {
-        fn set_value(_: anytype, state: *u64) void {
-            state.* = 99;
-        }
-    }.set_value);
-
-    try std.testing.expectEqual(notification_counter, 1);
-    try std.testing.expectEqual(last_seen_state, 99);
+    // Check that the method modified the store's state
+    const new_store_val = store.getCopy();
+    try std.testing.expectEqual(new_store_val, 100);
 }
 
 test "store: getCopy and set" {
     const allocator = std.testing.allocator;
-
-    var store = try Store(u64).init(allocator, 42);
+    var store = Store(u64).init(allocator, 1);
     defer store.deinit();
 
-    // Test getCopy
-    const value = store.getCopy();
-    try std.testing.expectEqual(value, 42);
+    store.set(99);
+    const val = store.getCopy();
+    try std.testing.expectEqual(val, 99);
+}
 
-    // Register callback to test notification
-    notification_counter = 0;
-    last_seen_state = 0;
-    try store.subscribe(.{ .context = null, .callback = &on_state_change });
+test "store: complex state" {
+    const allocator = std.testing.allocator;
+    const initial_state = TestContext.ComplexState{ .one = 123, .two = 456 };
+    var store = Store(TestContext.ComplexState).init(allocator, initial_state);
+    defer store.deinit();
 
-    // Test set
-    store.set(100);
+    var ctx = TestContext{};
+    store.with(&ctx, TestContext.read_complex);
 
-    // Verify state was updated
-    const new_value = store.getCopy();
-    try std.testing.expectEqual(new_value, 100);
-
-    // Verify subscriber was notified
-    try std.testing.expectEqual(notification_counter, 1);
-    try std.testing.expectEqual(last_seen_state, 100);
+    try std.testing.expectEqual(ctx.read_value, 123);
+    try std.testing.expectEqual(ctx.read_two, 456);
 }
