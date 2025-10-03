@@ -1,8 +1,8 @@
 const std = @import("std");
 
-/// A generic, thread-safe container for managing a piece of shared state.
+/// A generic, threa.d-safe container for managing a piece of shared state.
 /// It allows multiple parts of an application to subscribe to state changes,
-/// ensuring that data access is safe and that the UI can react to updates.
+/// ensuring that data access is safe and that the UI can react to updates
 pub fn Store(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -62,6 +62,16 @@ pub fn Store(comptime T: type) type {
             callback(context, &self.state);
         }
 
+        /// Returns a copy of the current state. This is best for simple, copyable types.
+        /// For large or complex state, prefer using get with a callback to avoid copying.
+        /// The upside of using this method is that you do not need to mess with callbacks.
+        pub fn getCopy(self: *Self) T {
+            self.lock.lockShared();
+            defer self.lock.unlockShared();
+
+            return self.state;
+        }
+
         /// Provides safe, writeable, locked access to the state via a callback.
         /// After the callback runs, it notifies all subscribers of the change.
         pub fn update(self: *Self, context: anytype, comptime update_fn: fn (ctx: anytype, state: *T) void) void {
@@ -73,6 +83,20 @@ pub fn Store(comptime T: type) type {
             update_fn(context, &self.state);
 
             // 3. Notify all subscribers of the change.
+            for (self.subscribers.items) |sub| {
+                sub.callback(sub.context, &self.state);
+            }
+        }
+
+        /// Overwrites the current state with a new value and notifies all subscribers.
+        /// This is most efficient for simple, copyable types. For in-place modifications
+        /// of large or complex state, prefer using update with a callback.
+        pub fn set(self: *Self, new_state: T) void {
+            self.lock.lock();
+            defer self.lock.unlock();
+
+            self.state = new_state;
+
             for (self.subscribers.items) |sub| {
                 sub.callback(sub.context, &self.state);
             }
@@ -150,4 +174,31 @@ test "store: subscribe to changes" {
 
     try std.testing.expectEqual(notification_counter, 1);
     try std.testing.expectEqual(last_seen_state, 99);
+}
+
+test "store: getCopy and set" {
+    const allocator = std.testing.allocator;
+
+    var store = try Store(u64).init(allocator, 42);
+    defer store.deinit();
+
+    // Test getCopy
+    const value = store.getCopy();
+    try std.testing.expectEqual(value, 42);
+
+    // Register callback to test notification
+    notification_counter = 0;
+    last_seen_state = 0;
+    try store.subscribe(.{ .context = null, .callback = &on_state_change });
+
+    // Test set
+    store.set(100);
+
+    // Verify state was updated
+    const new_value = store.getCopy();
+    try std.testing.expectEqual(new_value, 100);
+
+    // Verify subscriber was notified
+    try std.testing.expectEqual(notification_counter, 1);
+    try std.testing.expectEqual(last_seen_state, 100);
 }
