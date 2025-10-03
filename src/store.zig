@@ -1,8 +1,8 @@
 const std = @import("std");
 
-/// A generic, threa.d-safe container for managing a piece of shared state.
+/// A generic, thread-safe container for managing a piece of shared state.
 /// It allows multiple parts of an application to subscribe to state changes,
-/// ensuring that data access is safe and that the UI can react to updates
+/// ensuring that data access is safe and that the UI can react to updates.
 pub fn Store(comptime T: type) type {
     return struct {
         const Self = @This();
