@@ -15,6 +15,8 @@ I did not create a whole UI system. For the UI we use the excellent library [Cla
 
 4.  **Flexible Memory Management:** You have the freedom to provide a custom allocator for any component. For common patterns, such as short-lived string allocations within a single frame, we also provide convenient, optimized solutions like a built-in FrameAllocator.
 
+5. **Keep it simple** Try to minimize the usage of dependencies. If we can implement the feature in a straightforward & simple way and it archieves 95% of what we want then use this instead of complex solutions.  
+
 ## UI Design Philosophy
 
 The library is designed with a clear separation of concerns, following a pattern inspired by modern web frameworks like React.

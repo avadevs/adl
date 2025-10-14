@@ -1,220 +1,104 @@
+/// The jobs module is making the creation and management of asynchronous work easier.
+/// Jobs are created by the developer and will then be executed by one thread.
+/// Threads will spawn based on the provided configuration.
+///
+/// You can think of jobs as the input to the job system.
+/// Events on the other hand are the output of the job system and are usually created
+/// during the execution of a scheduled job.
+///
+/// Both Jobs and Events have a unique ID to identify them later on.
+/// You can try to cancel a job but cancellation is cooperative so you need to
+/// check for cancellation during the execution of the job.
+///
+/// Jobs and Events will have their own multi producer multi consumer (mpmc) queue
+/// to ensure we provide maximum flexiblity to you as the developer.
+/// This means that you can schedule jobs from your regular code and also from other jobs
+/// (synchronous and asynchronous job handling).
+/// This allows us to create events (the output of the system) directly from the jobs,
+/// which means we don't have to go through a single-threaded job "executor" to collect the results of
+/// each job to then create events.
+/// You can then consume the events from all threads because the queue allows multiple consumers.
+///
 const std = @import("std");
-const core = @import("core");
-const zjobs = @import("zjobs");
-const win32 = core.platform;
+const mpmc_queue = @import("mpmc_queue.zig");
 
-// This file contains all definitions for the application's background job system.
+pub const Id: type = usize;
 
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Step 1: Define the results that jobs can produce.
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-const OpenProcessError = error{OpenProcessFailed};
-
-pub const TaskResult = union(enum) {
-    AttachProcess: struct {
-        request_id: u64,
-        result: union(enum) {
-            Success: struct {
-                handle: win32.HANDLE,
-            },
-            Failure: struct {
-                reason: anyerror,
-            },
-        },
-    },
-
-    RefreshProcesses: struct {
-        request_id: u64,
-        result: union(enum) {
-            Success: struct {
-                processes: std.ArrayList(win32.ProcessInfo),
-            },
-            Failure: struct {
-                reason: anyerror,
-            },
-        },
-    },
-
-    PopulateMemoryRegions: struct {
-        request_id: u64,
-        result: union(enum) {
-            Success,
-            Failure: struct {
-                reason: anyerror,
-            },
-        },
-    },
+//--- Options ---
+pub const JobsOptions = struct {
+    job_capacity: usize,
+    thread_count: usize = std.Thread.getCpuCount() - 1 catch 1,
 };
 
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Step 2: Define the concrete job structs that zjobs will execute.
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//--- Job ---
+pub const JobFn = *const fn (*Jobs, *anyopaque) void;
 
-pub const AttachProcessJob = struct {
-    pid: win32.DWORD,
-    request_id: u64,
-    result_queue: *std.ArrayList(TaskResult),
-    mutex: *std.Thread.Mutex,
-
-    pub fn exec(self: *@This()) void {
-        const handle: ?win32.HANDLE = win32.openProcess(self.pid);
-        const result = if (handle) |h| TaskResult{ .AttachProcess = .{ .request_id = self.request_id, .result = .{ .Success = .{ .handle = h } } } } else TaskResult{ .AttachProcess = .{ .request_id = self.request_id, .result = .{ .Failure = .{ .reason = OpenProcessError.OpenProcessFailed } } } };
-
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        self.result_queue.append(result) catch |e| {
-            std.log.err("Failed to push AttachProcess result to queue: {any}", .{e});
-        };
-    }
+/// A job is the input to the job system. It declares
+/// the work that you want to have done on your thread pool.
+pub const Job = struct {
+    id: Id,
+    work: JobFn,
 };
 
-pub const RefreshProcessesJob = struct {
-    request_id: u64,
+//--- Event ---
+pub const EventKind = enum {
+    progress,
+    completed,
+    failed,
+    cancelled,
+};
+
+/// An event is the output of the job system. It is created by the job system
+/// when the job is completed.
+/// You can react to events that get emitted by the job system.
+/// You can bind to the event by type of event or by the id of the event.
+pub const Event = struct {
+    id: Id,
+    kind: EventKind,
+    payload: ?*anyopaque,
+};
+
+/// This struct holds the queue that is responsible for holding the jobs.
+/// You can schedule jobs by pushing the jobs into the queue.
+/// The jobs are executed by the thred pool that is created by the job system.
+pub const Jobs = struct {
     allocator: std.mem.Allocator,
-    result_queue: *std.ArrayList(TaskResult),
-    mutex: *std.Thread.Mutex,
+    _queue: mpmc_queue.Queue(null),
+    _threads: std.Thread.Pool,
+    _id_counter: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
-    pub fn exec(self: *@This()) void {
-        const processes = win32.getAllProcesses(self.allocator);
-        const result = if (processes) |procs| TaskResult{
-            .RefreshProcesses = .{
-                .request_id = self.request_id,
-                .result = .{
-                    .Success = .{ .processes = procs },
-                },
-            },
-        } else |err| TaskResult{
-            .RefreshProcesses = .{
-                .request_id = self.request_id,
-                .result = .{
-                    .Failure = .{ .reason = err },
-                },
-            },
-        };
-
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        self.result_queue.append(result) catch |e| {
-            std.log.err("Failed to push RefreshProcesses result to queue: {any}", .{e});
-        };
-    }
-};
-
-pub const PopulateMemoryRegionsJob = struct {
-    request_id: u64,
-    session: *core.engine.ScannerSession,
-    result_queue: *std.ArrayList(TaskResult),
-    mutex: *std.Thread.Mutex,
-
-    pub fn exec(self: *@This()) void {
-        self.session.populateMemoryRegions() catch |err| {
-            const result = TaskResult{ .PopulateMemoryRegions = .{ .request_id = self.request_id, .result = .{ .Failure = .{ .reason = err } } } };
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            self.result_queue.append(result) catch |e| {
-                std.log.err("Failed to push PopulateMemoryRegions result to queue: {any}", .{e});
-            };
-            return;
-        };
-
-        const result = TaskResult{ .PopulateMemoryRegions = .{ .request_id = self.request_id, .result = .Success } };
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        self.result_queue.append(result) catch |e| {
-            std.log.err("Failed to push PopulateMemoryRegions result to queue: {any}", .{e});
-        };
-    }
-};
-
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Step 3: Define a central runner for scheduling and handling jobs.
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-pub const JobRunner = struct {
-    allocator: std.mem.Allocator,
-    job_system: zjobs.JobQueue,
-    result_queue: std.ArrayList(TaskResult),
-    result_mutex: std.Thread.Mutex = .{},
-    next_request_id: u64 = 1,
-
-    pub fn init(allocator: std.mem.Allocator) !JobRunner {
-        return .{
+    pub fn init(allocator: std.mem.Allocator, options: JobsOptions) !Jobs {
+        var jobs = Jobs{
             .allocator = allocator,
-            .job_system = zjobs.JobQueue(.{ .idle_sleep_ns = std.time.ns_per_ms * 10 }).init(),
-            .result_queue = std.ArrayList(TaskResult).init(allocator),
+            ._queue = try mpmc_queue.Queue(null).init(allocator, options.job_capacity),
         };
-    }
 
-    pub fn deinit(self: *JobRunner) void {
-        self.job_system.deinit();
-        self.result_queue.deinit();
-    }
-
-    pub fn start(self: *JobRunner) void {
-        self.job_system.start(.{});
-    }
-
-    pub fn getResults(self: *JobRunner, out_results: *std.ArrayList(TaskResult)) void {
-        self.result_mutex.lock();
-        defer self.result_mutex.unlock();
-        out_results.clearRetainingCapacity();
-        out_results.appendSlice(self.result_queue.items) catch |err| {
-            std.log.err("Failed to append results: {any}", .{err});
+        jobs._threads.init(.{ .allocator = allocator, .n_jobs = options.thread_count }) catch |err| {
+            std.log.err("Failed to initialize threads: {any}", .{err});
+            return error.FailedToInitializeThreads;
         };
-        self.result_queue.clearRetainingCapacity();
+
+        return jobs;
     }
 
-    fn nextId(self: *JobRunner) u64 {
-        const id = self.next_request_id;
-        self.next_request_id += 1;
+    pub fn deinit(self: *Jobs) void {
+        self._queue.deinit();
+        self._threads.deinit();
+    }
+
+    /// Adds a job to the queue. This will block until the job is added.
+    /// Returns the id of the job that was added.
+    pub fn addJob(self: *Jobs) !usize {
+        const id = self._id_counter.fetchAdd(1, .monotonic);
+
+        self._queue.push(null);
+
         return id;
     }
 
-    // --- Job Scheduling Functions ---
-
-    pub fn scheduleAttachProcess(self: *JobRunner, pid: u32) u64 {
-        const id = self.nextId();
-        const job = AttachProcessJob{
-            .pid = pid,
-            .request_id = id,
-            .result_queue = &self.result_queue,
-            .mutex = &self.result_mutex,
-        };
-        _ = self.job_system.schedule(.none, job) catch |err| {
-            std.log.err("Failed to schedule AttachProcessJob: {any}", .{err});
-        };
-        std.log.info("Scheduled job to attach to PID: {}", .{pid});
-        return id;
-    }
-
-    pub fn scheduleRefreshProcesses(self: *JobRunner) u64 {
-        const id = self.nextId();
-        const job = RefreshProcessesJob{
-            .request_id = id,
-            .allocator = self.allocator,
-            .result_queue = &self.result_queue,
-            .mutex = &self.result_mutex,
-        };
-        _ = self.job_system.schedule(.none, job) catch |err| {
-            std.log.err("Failed to schedule RefreshProcessesJob: {any}", .{err});
-        };
-        std.log.info("Scheduled job to refresh processes", .{});
-        return id;
-    }
-
-    pub fn schedulePopulateMemoryRegions(self: *JobRunner, session: *core.engine.ScannerSession) u64 {
-        const id = self.nextId();
-        const job = PopulateMemoryRegionsJob{
-            .request_id = id,
-            .session = session,
-            .result_queue = &self.result_queue,
-            .mutex = &self.result_mutex,
-        };
-        _ = self.job_system.schedule(.none, job) catch |err| {
-            std.log.err("Failed to schedule PopulateMemoryRegionsJob: {any}", .{err});
-        };
-        std.log.info("Scheduled job to populate memory regions", .{});
-        return id;
+    /// Tries to add a job to the queue.
+    /// Returns the id of the job that was added.
+    pub fn tryAddJob(self: *Jobs) !usize {
+        return self._queue.tryPush(null);
     }
 };

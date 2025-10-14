@@ -59,6 +59,11 @@ pub fn build(b: *std.Build) void {
     // Zjobs
     const zjobs = b.dependency("zjobs", .{});
 
+    // Make dependencies available to the top-level module used by module tests
+    mod.addImport("raylib", raylib);
+    mod.addImport("zclay", zclay_dep.module("zclay"));
+    mod.addImport("zjobs", zjobs.module("root"));
+
     const lib = b.addLibrary(.{
         .name = "adl",
         .linkage = .static,

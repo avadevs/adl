@@ -4,7 +4,7 @@ const std = @import("std");
 /// It allows multiple parts of an application to safely access and modify
 /// state from different threads.
 /// The store is meant to be read frequently so it does not provide the usuale
-/// subscribe mechanisms use might be used too, this is because this is a
+/// subscribe mechanisms you might be used to, this is because this is a
 /// library for itermediate UI.
 pub fn Store(comptime T: type) type {
     return struct {
