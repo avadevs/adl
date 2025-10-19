@@ -549,7 +549,7 @@ test "route: screen creation failure" {
     defer router.deinit();
 
     const url = try URL.init(allocator, "/fail");
-    try router.routes.append(router.allocator, .{ .url = url, .screen = .{ .vtable = &TEST_SCREEN_VTABLE, .state = null, .context = null } });
+    try router.routes.append(router.allocator, .{ .url = url, .screen = .{ .vtable = &FAILING_SCREEN_VTABLE, .state = null, .context = null } });
 
     try std.testing.expectError(error.ScreenCreationFailure, router.route("/fail"));
 
