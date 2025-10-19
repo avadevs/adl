@@ -2,7 +2,7 @@
 This library provides a lot of different basic components that somebody might need to use to create a multithreaded UI application.
 I tried to make every component as generic as possible. This means the library is suited for most GUI applications you might encounter.
 
-A lot of the components are inspired by web application development. We have components like stores or a router (called navigator here) that you might know from different web frameworks. But the components and especially the UI differs from the implementation because the UI is a intermediate UI. This means the UI will completly rerender every frame. While this sounds very inefficient it is actually very fast and prevents a lot of pitfalls retained UIs come with.
+A lot of the components are inspired by web application development. We have components like stores or a router that you might know from different web frameworks. But the components and especially the UI differs from the implementation because the UI is a immediate UI. This means the UI will completly rerender every frame. While this sounds very inefficient it is actually very fast and prevents a lot of pitfalls retained UIs come with.
 I did not create a whole UI system. For the UI we use the excellent library [Clay UI](https://github.com/nicbarker/clay) and the following [zig bindings](https://github.com/johan0A/clay-zig-bindings).
 
 ## Principles
@@ -47,7 +47,7 @@ The library is organized by architectural role to make it easy to understand and
     -   `scroll_list.zig`
     -   `scroll_table.zig`
 
--   `jobs.zig` A job scheduling solution built on top of [zjobs](https://github.com/zig-gamedev/zjobs) that allows us to pass the result of the jobs back to callback functions.
+-   `jobs.zig` A job system that allows you to schedule jobs on threads for concurrent execution. Events are used to communicate changes back to registered listeners.
 
 -   `store.zig` A component that allows you to store a piece of memory and is accessable by multiple threads (uses RwLock to synchronize).
 

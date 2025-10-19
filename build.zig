@@ -56,13 +56,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Zjobs
-    const zjobs = b.dependency("zjobs", .{});
-
     // Make dependencies available to the top-level module used by module tests
     mod.addImport("raylib", raylib);
     mod.addImport("zclay", zclay_dep.module("zclay"));
-    mod.addImport("zjobs", zjobs.module("root"));
 
     const lib = b.addLibrary(.{
         .name = "adl",
@@ -76,7 +72,6 @@ pub fn build(b: *std.Build) void {
 
     lib.root_module.addImport("raylib", raylib);
     lib.root_module.addImport("zclay", zclay_dep.module("zclay"));
-    lib.root_module.addImport("zjobs", zjobs.module("root"));
     lib.linkLibC();
 
     mod.linkLibrary(lib);
@@ -100,7 +95,6 @@ pub fn build(b: *std.Build) void {
 
     lib_tests.root_module.addImport("raylib", raylib);
     lib_tests.root_module.addImport("zclay", zclay_dep.module("zclay"));
-    lib_tests.root_module.addImport("zjobs", zjobs.module("root"));
     lib_tests.linkLibC();
 
     // A run step that will run the second test executable.

@@ -40,10 +40,6 @@
             .url = "git+https://github.com/raylib-zig/raylib-zig?ref=devel#9ad8b8ba7432642acc336d17539e73c3fb9ac300",
             .hash = "raylib_zig-5.6.0-dev-KE8REK4zBQA5y8W9NTGXGHM3YKFtS5UDttcwZ4GTZSau",
         },
-        .zjobs = .{
-            .url = "https://github.com/hendrikdevs/zjobs/archive/refs/heads/add_wait.tar.gz",
-            .hash = "zjobs-0.3.0-dev-59uaZhPRAAD1mzsl3NRKLrFWqdvsnFeermUVzuOTzBbt",
-        },
     },
     // Specifies the set of files and directories that are included in this package.
     // Only files and directories listed here are included in the `hash` that
