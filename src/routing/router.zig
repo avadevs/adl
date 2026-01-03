@@ -2,6 +2,10 @@ const std = @import("std");
 const route = @import("route.zig");
 const screen = @import("screen.zig");
 
+pub const Route = route.Route;
+pub const RouteArgs = route.RouteArgs;
+pub const HistoryPolicy = route.HistoryPolicy;
+
 const log = std.log.scoped(.ADL_router);
 
 pub const RouterConfig = struct {
