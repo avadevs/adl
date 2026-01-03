@@ -1,65 +1,41 @@
 const std = @import("std");
 
-// Although this function looks imperative, it does not perform the build
-// directly and instead it mutates the build graph (`b`) that will be then
-// executed by an external runner. The functions in `std.Build` implement a DSL
-// for defining build steps and express dependencies between them, allowing the
-// build runner to parallelize the build automatically (and the cache system to
-// know when a step doesn't need to be re-run).
 pub fn build(b: *std.Build) void {
-    // Standard target options allow the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
-    // It's also possible to define more custom flags to toggle optional features
-    // of this build script using `b.option()`. All defined flags (including
-    // target and optimize options) will be listed when running `zig build --help`
-    // in this directory.
 
-    // This creates a module, which represents a collection of source files alongside
-    // some compilation options, such as optimization mode and linked system libraries.
-    // Zig modules are the preferred way of making Zig code available to consumers.
-    // addModule defines a module that we intend to make available for importing
-    // to our consumers. We must give it a name because a Zig package can expose
-    // multiple modules and consumers will need to be able to specify which
-    // module they want to access.
-    const mod = b.addModule("adl", .{
-        // The root source file is the "entry point" of this module. Users of
-        // this module will only be able to access public declarations contained
-        // in this file, which means that if you have declarations that you
-        // intend to expose to consumers that were defined in other files part
-        // of this module, you will have to make sure to re-export them from
-        // the root file.
+    // 1. The Core ADL Module (No Raylib dependency)
+    const adl_mod = b.addModule("adl", .{
         .root_source_file = b.path("src/root.zig"),
-        // Later on we'll use this module as the root module of a test executable
-        // which requires us to specify a target.
-        .target = target,
-    });
-
-    // Raylib
-    const raylib_dep = b.dependency("raylib_zig", .{
         .target = target,
         .optimize = optimize,
     });
 
-    const raylib = raylib_dep.module("raylib"); // main raylib module
-    const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
-
-    // Zclay
+    // Zclay is required for core ADL
     const zclay_dep = b.dependency("zclay", .{
         .target = target,
         .optimize = optimize,
     });
+    adl_mod.addImport("zclay", zclay_dep.module("zclay"));
 
-    // Make dependencies available to the top-level module used by module tests
-    mod.addImport("raylib", raylib);
-    mod.addImport("zclay", zclay_dep.module("zclay"));
+    // 2. The Raylib Backend Module (Optional for users)
+    const raylib_dep = b.dependency("raylib_zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const raylib_mod = raylib_dep.module("raylib");
+    // const raylib_artifact = raylib_dep.artifact("raylib");
 
+    const backend_mod = b.addModule("adl_raylib", .{
+        .root_source_file = b.path("src/backends/raylib_backend.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    backend_mod.addImport("adl", adl_mod);
+    backend_mod.addImport("raylib", raylib_mod);
+    backend_mod.addImport("zclay", zclay_dep.module("zclay"));
+
+    // 3. Static Library
     const lib = b.addLibrary(.{
         .name = "adl",
         .linkage = .static,
@@ -69,63 +45,16 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/root.zig"),
         }),
     });
-
-    lib.root_module.addImport("raylib", raylib);
     lib.root_module.addImport("zclay", zclay_dep.module("zclay"));
     lib.linkLibC();
+    b.installArtifact(lib);
 
-    mod.linkLibrary(lib);
-
-    // Creates an executable that will run `test` blocks from the provided module.
-    // Here `mod` needs to define a target, which is why earlier we made sure to
-    // set the releative field.
+    // 4. Tests
     const mod_tests = b.addTest(.{
-        .root_module = mod,
+        .root_module = adl_mod,
     });
-
-    // A run step that will run the test executable.
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
-    // Creates an executable that will run `test` blocks from the executable's
-    // root module. Note that test executables only test one module at a time,
-    // hence why we have to create two separate ones.
-    const lib_tests = b.addTest(.{
-        .root_module = lib.root_module,
-    });
-
-    lib_tests.root_module.addImport("raylib", raylib);
-    lib_tests.root_module.addImport("zclay", zclay_dep.module("zclay"));
-    lib_tests.linkLibC();
-
-    // A run step that will run the second test executable.
-    const run_lib_tests = b.addRunArtifact(lib_tests);
-
-    // Create an executable for the basic example
-    const example_exe = b.addExecutable(.{
-        .name = "basic_example",
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .root_source_file = b.path("examples/02_basic_example.zig"),
-        }),
-    });
-
-    // Make the adl module and dependencies available to the example
-    example_exe.root_module.addImport("adl", mod);
-    example_exe.root_module.addImport("raylib", raylib);
-    example_exe.root_module.addImport("zclay", zclay_dep.module("zclay"));
-    example_exe.linkLibrary(raylib_artifact);
-    example_exe.linkLibC();
-
-    // A run step for the basic example
-    const run_example = b.addRunArtifact(example_exe);
-    const run_example_step = b.step("run_example", "Run the basic example");
-    run_example_step.dependOn(&run_example.step);
-
-    // A top level step for running all tests. dependOn can be called multiple
-    // times and since the two run steps do not depend on one another, this will
-    // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
-    test_step.dependOn(&run_lib_tests.step);
 }

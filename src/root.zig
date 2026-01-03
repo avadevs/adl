@@ -6,6 +6,7 @@ pub const jobs = @import("jobs.zig");
 pub const router = @import("routing/router.zig");
 pub const routing = @import("routing/router.zig");
 pub const store = @import("store.zig");
+pub const clay = @import("zclay");
 
 test {
     _ = @import("ui/ui.zig");

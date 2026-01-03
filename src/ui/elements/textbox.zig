@@ -10,7 +10,6 @@
 /// - Placeholder: Displays placeholder text when empty.
 const std = @import("std");
 const cl = @import("zclay");
-const rl = @import("raylib");
 const t = @import("../core/theme.zig");
 const UIContext = @import("../core/context.zig").UIContext;
 
@@ -76,7 +75,7 @@ fn onHoverCallback(id: cl.ElementId, pointerInfo: cl.PointerData, state: *State)
     const options = state.options;
 
     // Change the mouse cursor to the I-beam to indicate text input.
-    rl.setMouseCursor(.ibeam);
+    ctx.input.setMouseCursor(.ibeam);
 
     // If pressed -> set focus and move cursor
     if (pointerInfo.state == .pressed_this_frame) {
@@ -144,7 +143,7 @@ pub fn render(ctx: *UIContext, id: cl.ElementId, state: *State, options: Options
         // This loop handles multiple characters per frame if needed.
         // This is for TEXT INPUT and is separate from our key state manager.
         while (true) {
-            const char_code = rl.getCharPressed();
+            const char_code = ctx.input.getCharPressed();
             if (char_code == 0) break;
 
             if (char_code >= 32 and char_code <= 125) { // Basic ASCII range

@@ -2,6 +2,7 @@ const std = @import("std");
 const cl = @import("zclay");
 const t = @import("./theme.zig");
 const input = @import("./input.zig");
+const types = @import("./types.zig");
 
 /// UIContext holds the global state for the entire UI for a single frame.
 /// A pointer to this struct is passed to every UI component. It is the "single
@@ -9,7 +10,7 @@ const input = @import("./input.zig");
 ///
 /// Usage:
 /// ```zig
-/// var ui_context = try UIContext.init(allocator, &my_theme, my_measure_text_fn);
+/// var ui_context = try UIContext.init(allocator, &my_theme, my_measure_text_fn, my_input_backend);
 /// defer ui_context.deinit();
 ///
 /// // In your main loop:
@@ -55,12 +56,12 @@ pub const UIContext = struct {
     /// the blinking cursor in a textbox.
     anim_timer: f32 = 0,
 
-    pub fn init(allocator: std.mem.Allocator, theme: *const t.THEME, measure_text_fn: ?*const fn (clay_text: []const u8, config: *cl.TextElementConfig, _: void) cl.Dimensions) !UIContext {
+    pub fn init(allocator: std.mem.Allocator, theme: *const t.THEME, measure_text_fn: ?*const fn (clay_text: []const u8, config: *cl.TextElementConfig, _: void) cl.Dimensions, backend: input.InputBackend) !UIContext {
         return .{
             .allocator = allocator,
             .theme = theme,
             .measure_text_fn = measure_text_fn,
-            .input = try input.InputManager.init(allocator),
+            .input = try input.InputManager.init(allocator, backend),
         };
     }
 
@@ -75,6 +76,9 @@ pub const UIContext = struct {
         // themselves as hot if the mouse is over them.
         self.hot_id = null;
         self.anim_timer += delta_time;
+
+        // Reset cursor to default at start of frame
+        self.input.setMouseCursor(.default);
     }
 };
 
@@ -82,13 +86,44 @@ pub fn dummyMeasureText(_: []const u8, _: *cl.TextElementConfig, _: void) cl.Dim
     return .{ .w = 0, .h = 0 };
 }
 
+fn dummyGetMousePos(_: *anyopaque) types.Vector2 {
+    return .{};
+}
+fn dummyGetMouseWheel(_: *anyopaque) f32 {
+    return 0;
+}
+fn dummyIsBtnDown(_: *anyopaque, _: types.MouseButton) bool {
+    return false;
+}
+fn dummyIsKeyDown(_: *anyopaque, _: types.Key) bool {
+    return false;
+}
+fn dummyGetKeyPressed(_: *anyopaque) ?types.Key {
+    return null;
+}
+fn dummyGetCharPressed(_: *anyopaque) u32 {
+    return 0;
+}
+fn dummySetMouseCursor(_: *anyopaque, _: types.CursorShape) void {}
+
 test "UIContext init and beginFrame logic" {
     const allocator = std.testing.allocator;
     const expect = std.testing.expect;
 
+    const dummy_backend = input.InputBackend{
+        .context = undefined,
+        .getMousePosition = dummyGetMousePos,
+        .getMouseWheelMove = dummyGetMouseWheel,
+        .isMouseButtonDown = dummyIsBtnDown,
+        .isKeyDown = dummyIsKeyDown,
+        .getKeyPressed = dummyGetKeyPressed,
+        .getCharPressed = dummyGetCharPressed,
+        .setMouseCursor = dummySetMouseCursor,
+    };
+
     // 1. Test init()
     var theme = t.THEME.init();
-    var ctx = try UIContext.init(allocator, &theme, &dummyMeasureText);
+    var ctx = try UIContext.init(allocator, &theme, &dummyMeasureText, dummy_backend);
     defer ctx.deinit();
 
     try expect(ctx.theme == &theme);

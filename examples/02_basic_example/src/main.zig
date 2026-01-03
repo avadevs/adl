@@ -1,6 +1,7 @@
 const std = @import("std");
 const adl = @import("adl");
-const cl = @import("zclay");
+const adl_rl = @import("adl_raylib");
+const cl = adl.clay;
 const rl = @import("raylib");
 
 const Jobs = adl.jobs.Jobs;
@@ -125,78 +126,6 @@ const HomeScreen = struct {
 };
 
 // ============================================================================
-// Raylib Integration
-// ============================================================================
-
-fn toRlColor(color: cl.Color) rl.Color {
-    return .{
-        .r = @intFromFloat(color[0]),
-        .g = @intFromFloat(color[1]),
-        .b = @intFromFloat(color[2]),
-        .a = @intFromFloat(color[3]),
-    };
-}
-
-fn raylibMeasureText(text: []const u8, config: *cl.TextElementConfig, _: void) cl.Dimensions {
-    const font = rl.getFontDefault() catch return .{ .w = 0, .h = 0 };
-    // Raylib expects a null-terminated string.
-    // We'll use a small buffer on stack for short strings, or alloc for long ones.
-    // Ideally we'd use an allocator passed in context, but for this signature we don't have it easily.
-    // However, text measurement is frequent.
-    // Let's assume text is relatively short for UI labels.
-    var buf: [1024]u8 = undefined;
-    if (text.len >= buf.len - 1) return .{ .w = 0, .h = 0 }; // Truncate or fail if too long
-    @memcpy(buf[0..text.len], text);
-    buf[text.len] = 0;
-    const c_text = buf[0..text.len :0];
-
-    const size = rl.measureTextEx(font, c_text, @floatFromInt(config.font_size), 0);
-    return .{ .w = size.x, .h = size.y };
-}
-
-fn clayRaylibRender(commands: []cl.RenderCommand) void {
-    for (commands) |cmd| {
-        const bbox = cmd.bounding_box;
-        switch (cmd.command_type) {
-            .rectangle => {
-                const config = cmd.render_data.rectangle;
-                rl.drawRectangleRounded(.{ .x = bbox.x, .y = bbox.y, .width = bbox.width, .height = bbox.height }, config.corner_radius.top_left / @min(bbox.width, bbox.height), 8, toRlColor(config.background_color));
-            },
-            .text => {
-                const config = cmd.render_data.text;
-                const text_len = config.string_contents.length;
-                const text_ptr = config.string_contents.chars;
-                const text = text_ptr[0..@intCast(text_len)];
-
-                var buf: [1024]u8 = undefined;
-                if (text.len < buf.len - 1) {
-                    @memcpy(buf[0..text.len], text);
-                    buf[text.len] = 0;
-                    const c_text = buf[0..text.len :0];
-
-                    if (rl.getFontDefault()) |font| {
-                        rl.drawTextEx(font, c_text, .{ .x = bbox.x, .y = bbox.y }, @floatFromInt(config.font_size), 0, toRlColor(config.text_color));
-                    } else |_| {}
-                }
-            },
-            .scissor_start => {
-                rl.beginScissorMode(@intFromFloat(bbox.x), @intFromFloat(bbox.y), @intFromFloat(bbox.width), @intFromFloat(bbox.height));
-            },
-            .scissor_end => {
-                rl.endScissorMode();
-            },
-            .border => {
-                // Simple border implementation
-                const config = cmd.render_data.border;
-                // Note: This version of raylib wrapper might not support line thickness in DrawRectangleRoundedLines
-                rl.drawRectangleRoundedLines(.{ .x = bbox.x, .y = bbox.y, .width = bbox.width, .height = bbox.height }, config.corner_radius.top_left / @min(bbox.width, bbox.height), 8, toRlColor(config.color));
-            },
-            else => {},
-        }
-    }
-}
-
-// ============================================================================
 // Main
 // ============================================================================
 
@@ -225,7 +154,11 @@ pub fn main() !void {
 
     // 4. Init UI
     const theme = Theme.init();
-    var ui_ctx = try UIContext.init(allocator, &theme, raylibMeasureText);
+
+    // Create Backend
+    const backend = adl_rl.createInputBackend();
+
+    var ui_ctx = try UIContext.init(allocator, &theme, adl_rl.measureText, backend);
     defer ui_ctx.deinit();
 
     // Init Clay
@@ -235,7 +168,7 @@ pub fn main() !void {
 
     const arena = cl.createArenaWithCapacityAndMemory(memory);
     _ = cl.initialize(arena, .{ .w = 800, .h = 600 }, .{});
-    cl.setMeasureTextFunction(void, {}, raylibMeasureText);
+    cl.setMeasureTextFunction(void, {}, adl_rl.measureText);
 
     // Setup global context
     g_ctx = .{
@@ -294,7 +227,7 @@ pub fn main() !void {
         rl.beginDrawing();
         rl.clearBackground(rl.Color.black);
 
-        clayRaylibRender(commands);
+        adl_rl.render(commands);
 
         rl.endDrawing();
         // ---------------------------

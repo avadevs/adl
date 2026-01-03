@@ -11,7 +11,6 @@
 /// - Sizing: Sizing can be passed in from the parent to allow the button to fit
 ///   content, grow, or have a fixed size.
 const std = @import("std");
-const rl = @import("raylib");
 const cl = @import("zclay");
 const t = @import("../core/theme.zig");
 const UIContext = @import("../core/context.zig").UIContext;
@@ -57,13 +56,13 @@ pub fn render(ctx: *UIContext, id: cl.ElementId, options: Options) bool {
 
     if (!options.is_disabled) {
         if (is_hovered) {
-            rl.setMouseCursor(.pointing_hand);
+            ctx.input.setMouseCursor(.pointing_hand);
         }
         is_focused = (ctx.focused_id != null and ctx.focused_id.?.id == id.id);
         is_active = (ctx.active_id != null and ctx.active_id.?.id == id.id);
 
         // On mouse down, the button becomes active and gains focus.
-        if (is_hovered and rl.isMouseButtonPressed(.left)) {
+        if (is_hovered and ctx.input.getMouse().left_button.isPressed()) {
             ctx.active_id = id;
             ctx.focused_id = id;
             is_active = true;
@@ -71,7 +70,7 @@ pub fn render(ctx: *UIContext, id: cl.ElementId, options: Options) bool {
         }
 
         // If the button is active, the click action happens on mouse release.
-        if (is_active and rl.isMouseButtonReleased(.left)) {
+        if (is_active and ctx.input.getMouse().left_button.isReleased()) {
             if (is_hovered) {
                 clicked = true;
             }
@@ -86,7 +85,9 @@ pub fn render(ctx: *UIContext, id: cl.ElementId, options: Options) bool {
             }
         }
     } else { // If button is disabled
-        if (is_hovered) rl.setMouseCursor(.not_allowed);
+        if (is_hovered) {
+            ctx.input.setMouseCursor(.not_allowed);
+        }
     }
 
     // --- Style Resolver --- //

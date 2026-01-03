@@ -1,6 +1,7 @@
 pub const context = @import("core/context.zig");
 pub const input = @import("core/input.zig");
 pub const theme = @import("core/theme.zig");
+pub const types = @import("core/types.zig");
 
 pub const useScrollContainer = @import("hooks/useScrollContainer.zig");
 
