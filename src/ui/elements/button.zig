@@ -42,11 +42,12 @@ pub const Options = struct {
     variant: ColorVariant = .neutral,
     modifier: StyleModifier = .normal,
     sizing: ?cl.Sizing = null,
+    theme_overrides: ?t.ThemeOverrides = null,
 };
 
 /// Renders a button. Returns `true` for the single frame the button is clicked.
 pub fn render(ctx: *UIContext, id: cl.ElementId, options: Options) bool {
-    const theme = ctx.theme;
+    const theme = t.merge(ctx.theme.*, options.theme_overrides);
 
     // 1. Determine interaction state (if not disabled)
     const is_hovered = cl.pointerOver(id);

@@ -137,3 +137,21 @@ pub const CursorShape = enum {
     resize_all,
     not_allowed,
 };
+
+/// Interaction state for a textbox (cursor, scroll).
+/// Data (text content) is owned externally.
+pub const TextboxState = struct {
+    cursor_pos: usize = 0,
+    scroll_offset_x: f32 = 0,
+};
+
+/// Interaction state for a scroll container.
+pub const ScrollState = struct {
+    scroll_offset: Vector2 = .{ .x = 0, .y = 0 },
+    is_dragging_thumb_y: bool = false,
+    drag_start_mouse_y: f32 = 0,
+    drag_start_scroll_y: f32 = 0,
+    is_dragging_thumb_x: bool = false,
+    drag_start_mouse_x: f32 = 0,
+    drag_start_scroll_x: f32 = 0,
+};

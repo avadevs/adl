@@ -68,17 +68,25 @@ fn simulationJob(jobs: *Jobs, ctx_ptr: *anyopaque) JobOutcome {
 
 const HomeScreen = struct {
     allocator: std.mem.Allocator,
+    text_buffer: std.ArrayList(u8),
+    textbox_state: adl.ui.textbox.State = .{},
+    scroll_state: adl.ui.scroll_area.State = .{},
 
     pub fn init(allocator: std.mem.Allocator, _: ?RouteArgs) !HomeScreen {
         return HomeScreen{
             .allocator = allocator,
+            .text_buffer = try std.ArrayList(u8).initCapacity(allocator, 32),
         };
     }
 
-    pub fn deinit(_: *HomeScreen) void {}
+    pub fn deinit(self: *HomeScreen) void {
+        self.text_buffer.deinit(self.allocator);
+    }
 
-    pub fn render(_: *HomeScreen) void {
-        const ui = g_ctx.ui;
+    pub fn render(self: *HomeScreen) void {
+        const ui_ctx = g_ctx.ui;
+        // Create the UI facade
+        const ui = adl.ui.UI.init(ui_ctx);
 
         // Access state safely
         const state = g_ctx.store.getCopy();
@@ -90,8 +98,27 @@ const HomeScreen = struct {
 
             cl.text(std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Last Job Result: {}", .{state.last_job_result}) catch "Result: ?", .{ .font_size = 24, .color = .{ 150, 150, 150, 255 } });
 
-            // Example: Render a button (logically)
-            if (adl.ui.button.render(ui, cl.ElementId.localID("btn_inc"), .{ .text = "Increment Counter", .variant = .primary })) {
+            // Example: Textbox (New Pattern)
+            ui.textbox(cl.ElementId.localID("my_input"), &self.textbox_state, &self.text_buffer, .{
+                .placeholder = "Enter number to add...",
+            });
+
+            // Example: Scroll Area (New Pattern)
+            ui.scrollArea(cl.ElementId.localID("scroll_area"), &self.scroll_state, .{ .content_height = 200 }, struct {
+                fn render() void {
+                    cl.text("I am inside a scroll area!", .{ .font_size = 20, .color = .{ 255, 255, 255, 255 } });
+                    cl.text("Me too!", .{ .font_size = 20, .color = .{ 200, 200, 200, 255 } });
+                    cl.text("Me three!", .{ .font_size = 20, .color = .{ 150, 150, 150, 255 } });
+                    cl.text("Me four!", .{ .font_size = 20, .color = .{ 100, 100, 100, 255 } });
+                    cl.text("Me five!", .{ .font_size = 20, .color = .{ 50, 50, 50, 255 } });
+                    cl.text("Me six!", .{ .font_size = 20, .color = .{ 100, 100, 100, 255 } });
+                    cl.text("Me seven!", .{ .font_size = 20, .color = .{ 150, 150, 150, 255 } });
+                    cl.text("Me eight!", .{ .font_size = 20, .color = .{ 200, 200, 200, 255 } });
+                }
+            }.render);
+
+            // Render buttons normally
+            if (ui.button(cl.ElementId.localID("btn_inc"), .{ .text = "Increment Counter", .variant = .primary })) {
                 {
                     const guard = g_ctx.store.write();
                     defer guard.release();
@@ -100,18 +127,18 @@ const HomeScreen = struct {
                 std.log.info("Button clicked! Counter: {}", .{state.counter});
             }
 
-            if (adl.ui.button.render(ui, cl.ElementId.localID("btn_job"), .{ .text = if (state.loading) "Processing..." else "Run Background Job", .is_disabled = state.loading, .variant = .accent })) {
+            if (ui.button(cl.ElementId.localID("btn_job"), .{ .text = if (state.loading) "Processing..." else "Run Background Job", .is_disabled = state.loading, .variant = .accent })) {
+                // Parse input
+                const input_val = std.fmt.parseInt(u32, self.text_buffer.items, 10) catch 0;
+
                 // Schedule a job
                 const job_data = g_ctx.jobs.allocator.create(JobData) catch return;
-                job_data.* = .{ .value = state.counter, .store = g_ctx.store };
-
-                // Set loading state
+                job_data.* = .{ .value = state.counter + input_val, .store = g_ctx.store };
                 {
                     const guard = g_ctx.store.write();
                     defer guard.release();
                     guard.state.loading = true;
                 }
-
                 _ = g_ctx.jobs.schedule(simulationJob, job_data) catch |err| {
                     std.log.err("Failed to schedule job: {}", .{err});
                 };
