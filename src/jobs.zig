@@ -81,7 +81,7 @@ pub const JobOutcome = union(enum) {
 
 pub const JobFn = *const fn (*Jobs, *anyopaque) JobOutcome;
 
-const Job = struct {
+pub const Job = struct {
     id: Id,
     work: JobFn,
     ctx: *anyopaque,
@@ -90,7 +90,7 @@ const Job = struct {
 /// The types that can be pushed onto the job queue.
 /// - `job`: A job to execute.
 /// - `stop`: A command to stop the worker threads.
-const WorkItem = union(enum) {
+pub const WorkItem = union(enum) {
     job: Job,
     stop: void,
 };
@@ -558,7 +558,7 @@ pub const Jobs = struct {
         gop.value_ptr.* = .{ .kind = kind, .payload = payload };
     }
 
-    fn publish(self: *Jobs, ev: Event) void {
+    pub fn publish(self: *Jobs, ev: Event) void {
         // by-kind
         self._subs.mutex.lock();
         var tmp_kind: ?std.ArrayListUnmanaged(*Subscriber) = null;

@@ -78,7 +78,7 @@ pub const UIContext = struct {
     }
 };
 
-fn dummyMeasureText(_: []const u8, _: *cl.TextElementConfig, _: void) cl.Dimensions {
+pub fn dummyMeasureText(_: []const u8, _: *cl.TextElementConfig, _: void) cl.Dimensions {
     return .{ .w = 0, .h = 0 };
 }
 
