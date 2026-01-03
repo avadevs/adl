@@ -52,15 +52,12 @@ fn simulationJob(jobs: *Jobs, ctx_ptr: *anyopaque) JobOutcome {
     std.Thread.sleep(1000 * 1000 * 1000); // 1000ms
 
     // Update store
-    const UpdateCtx = struct {
-        val: u32,
-        fn update(self: @This(), state: *AppState) void {
-            state.last_job_result = self.val;
-            state.loading = false;
-        }
-    };
-
-    data.store.updateWith(UpdateCtx{ .val = data.value * 2 }, UpdateCtx.update);
+    {
+        const guard = data.store.write();
+        defer guard.release();
+        guard.state.last_job_result = data.value * 2;
+        guard.state.loading = false;
+    }
 
     return .{ .completed = null };
 }
@@ -95,12 +92,11 @@ const HomeScreen = struct {
 
             // Example: Render a button (logically)
             if (adl.ui.button.render(ui, cl.ElementId.localID("btn_inc"), .{ .text = "Increment Counter", .variant = .primary })) {
-                const IncCtx = struct {
-                    fn update(_: @This(), s: *AppState) void {
-                        s.counter += 1;
-                    }
-                };
-                g_ctx.store.updateWith(IncCtx{}, IncCtx.update);
+                {
+                    const guard = g_ctx.store.write();
+                    defer guard.release();
+                    guard.state.counter += 1;
+                }
                 std.log.info("Button clicked! Counter: {}", .{state.counter});
             }
 
@@ -110,12 +106,11 @@ const HomeScreen = struct {
                 job_data.* = .{ .value = state.counter, .store = g_ctx.store };
 
                 // Set loading state
-                const LoadCtx = struct {
-                    fn update(_: @This(), s: *AppState) void {
-                        s.loading = true;
-                    }
-                };
-                g_ctx.store.updateWith(LoadCtx{}, LoadCtx.update);
+                {
+                    const guard = g_ctx.store.write();
+                    defer guard.release();
+                    guard.state.loading = true;
+                }
 
                 _ = g_ctx.jobs.schedule(simulationJob, job_data) catch |err| {
                     std.log.err("Failed to schedule job: {}", .{err});

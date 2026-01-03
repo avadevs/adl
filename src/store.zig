@@ -30,103 +30,89 @@ pub fn Store(comptime T: type) type {
             _ = self;
         }
 
-        /// Provides safe, read-only, locked access to the state by calling a
-        /// method on a given instance.
-        /// The provided `method` must have the signature:
-        /// `fn(self: *TypeOf(instance), state: *const T) void`
-        pub fn with(
-            self: *Self,
-            instance: anytype,
-            comptime method: fn (@TypeOf(instance), *const T) void,
-        ) void {
-            self.lock.lockShared();
-            defer self.lock.unlockShared();
+        pub const ReadGuard = struct {
+            parent: *Self,
+            state: *const T,
 
-            @call(.auto, method, .{ instance, &self.state });
+            pub fn release(self: *const ReadGuard) void {
+                self.parent.lock.unlockShared();
+            }
+        };
+
+        pub const WriteGuard = struct {
+            parent: *Self,
+            state: *T,
+
+            pub fn release(self: *const WriteGuard) void {
+                self.parent.lock.unlock();
+            }
+        };
+
+        /// Acquires a read lock and returns a guard containing the state.
+        /// You must call `guard.release()` or `defer guard.release()` when done.
+        pub fn read(self: *Self) ReadGuard {
+            self.lock.lockShared();
+            return .{
+                .parent = self,
+                .state = &self.state,
+            };
         }
 
-        /// Provides safe, writeable, locked access to the state by calling a
-        /// method on a given instance.
-        /// The provided `method` must have the signature:
-        /// `fn(self: *TypeOf(instance), state: *T) void`
-        pub fn updateWith(
-            self: *Self,
-            instance: anytype,
-            comptime method: fn (@TypeOf(instance), *T) void,
-        ) void {
+        /// Acquires a write lock and returns a guard containing the state.
+        /// You must call `guard.release()` or `defer guard.release()` when done.
+        pub fn write(self: *Self) WriteGuard {
             self.lock.lock();
-            defer self.lock.unlock();
-
-            @call(.auto, method, .{ instance, &self.state });
+            return .{
+                .parent = self,
+                .state = &self.state,
+            };
         }
 
         /// Returns a copy of the current state.
         /// This is best for simple, copyable types.
         pub fn getCopy(self: *Self) T {
-            self.lock.lockShared();
-            defer self.lock.unlockShared();
-            return self.state;
+            const guard = self.read();
+            defer guard.release();
+            return guard.state.*;
         }
 
         /// Overwrites the current state with a new value.
         /// This is most efficient for simple, copyable types.
         pub fn set(self: *Self, new_state: T) void {
-            self.lock.lock();
-            defer self.lock.unlock();
-            self.state = new_state;
+            const guard = self.write();
+            defer guard.release();
+            guard.state.* = new_state;
         }
     };
 }
 
 //--- Tests ---
-const TestContext = struct {
-    read_value: u64 = 0,
-    read_two: u32 = 0,
 
-    fn read_method(self: *TestContext, state: *const u64) void {
-        self.read_value = state.*;
-    }
-
-    fn update_method(self: *TestContext, state: *u64) void {
-        self.read_value = 50;
-        state.* = 100;
-    }
-
-    const ComplexState = struct {
-        one: u64,
-        two: u32,
-    };
-    fn read_complex(self: *TestContext, state: *const ComplexState) void {
-        self.read_value = state.one;
-        self.read_two = state.two;
-    }
-};
-
-test "store: with" {
+test "store: read" {
     const allocator = std.testing.allocator;
     var store = Store(u64).init(allocator, 42);
     defer store.deinit();
 
-    var ctx = TestContext{};
-    store.with(&ctx, TestContext.read_method);
+    const guard = store.read();
+    defer guard.release();
 
-    try std.testing.expectEqual(ctx.read_value, 42);
+    try std.testing.expectEqual(guard.state.*, 42);
 }
 
-test "store: updateWith" {
+test "store: write" {
     const allocator = std.testing.allocator;
     var store = Store(u64).init(allocator, 0);
     defer store.deinit();
 
-    var ctx = TestContext{};
-    store.updateWith(&ctx, TestContext.update_method);
+    {
+        const guard = store.write();
+        defer guard.release();
+        guard.state.* = 100;
+    }
 
-    // Check that the method modified its own state
-    try std.testing.expectEqual(ctx.read_value, 50);
-
-    // Check that the method modified the store's state
-    const new_store_val = store.getCopy();
-    try std.testing.expectEqual(new_store_val, 100);
+    const guard = store.read();
+    defer guard.release();
+    try std.testing.expectEqual(guard.state.*, 100);
 }
 
 test "store: getCopy and set" {
@@ -140,14 +126,19 @@ test "store: getCopy and set" {
 }
 
 test "store: complex state" {
+    const ComplexState = struct {
+        one: u64,
+        two: u32,
+    };
+
     const allocator = std.testing.allocator;
-    const initial_state = TestContext.ComplexState{ .one = 123, .two = 456 };
-    var store = Store(TestContext.ComplexState).init(allocator, initial_state);
+    const initial_state = ComplexState{ .one = 123, .two = 456 };
+    var store = Store(ComplexState).init(allocator, initial_state);
     defer store.deinit();
 
-    var ctx = TestContext{};
-    store.with(&ctx, TestContext.read_complex);
+    const guard = store.read();
+    defer guard.release();
 
-    try std.testing.expectEqual(ctx.read_value, 123);
-    try std.testing.expectEqual(ctx.read_two, 456);
+    try std.testing.expectEqual(guard.state.one, 123);
+    try std.testing.expectEqual(guard.state.two, 456);
 }

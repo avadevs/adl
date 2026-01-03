@@ -376,12 +376,12 @@ test "Router: Basic .back() + .forward() test" {
 
     try router.navigate("/pageB");
 
-    try router.back();
+    _ = try router.back();
 
     var current_page_url = router.history.items[router.history_index].url;
     try std.testing.expect(std.mem.eql(u8, current_page_url, "/pageA"));
 
-    try router.forward();
+    _ = try router.forward();
     current_page_url = router.history.items[router.history_index].url;
     try std.testing.expect(std.mem.eql(u8, current_page_url, "/pageB"));
 }
