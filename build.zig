@@ -19,21 +19,20 @@ pub fn build(b: *std.Build) void {
     adl_mod.addImport("zclay", zclay_dep.module("zclay"));
 
     // 2. The Raylib Backend Module (Optional for users)
-    const raylib_dep = b.dependency("raylib_zig", .{
+    if (b.lazyDependency("raylib_zig", .{
         .target = target,
         .optimize = optimize,
-    });
-    const raylib_mod = raylib_dep.module("raylib");
-    // const raylib_artifact = raylib_dep.artifact("raylib");
-
-    const backend_mod = b.addModule("adl_raylib", .{
-        .root_source_file = b.path("src/backends/raylib_backend.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    backend_mod.addImport("adl", adl_mod);
-    backend_mod.addImport("raylib", raylib_mod);
-    backend_mod.addImport("zclay", zclay_dep.module("zclay"));
+    })) |raylib_dep| {
+        const raylib_mod = raylib_dep.module("raylib");
+        const backend_mod = b.addModule("adl_raylib", .{
+            .root_source_file = b.path("src/backends/raylib_backend.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        backend_mod.addImport("adl", adl_mod);
+        backend_mod.addImport("raylib", raylib_mod);
+        backend_mod.addImport("zclay", zclay_dep.module("zclay"));
+    }
 
     // 3. Static Library
     const lib = b.addLibrary(.{
