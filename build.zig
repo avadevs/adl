@@ -48,7 +48,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const raylib = raylib_dep.module("raylib"); // main raylib module
-    // const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
+    const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
 
     // Zclay
     const zclay_dep = b.dependency("zclay", .{
@@ -99,6 +99,28 @@ pub fn build(b: *std.Build) void {
 
     // A run step that will run the second test executable.
     const run_lib_tests = b.addRunArtifact(lib_tests);
+
+    // Create an executable for the basic example
+    const example_exe = b.addExecutable(.{
+        .name = "basic_example",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("examples/02_basic_example.zig"),
+        }),
+    });
+
+    // Make the adl module and dependencies available to the example
+    example_exe.root_module.addImport("adl", mod);
+    example_exe.root_module.addImport("raylib", raylib);
+    example_exe.root_module.addImport("zclay", zclay_dep.module("zclay"));
+    example_exe.linkLibrary(raylib_artifact);
+    example_exe.linkLibC();
+
+    // A run step for the basic example
+    const run_example = b.addRunArtifact(example_exe);
+    const run_example_step = b.step("run_example", "Run the basic example");
+    run_example_step.dependOn(&run_example.step);
 
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
