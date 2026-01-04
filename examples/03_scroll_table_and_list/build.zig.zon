@@ -1,0 +1,20 @@
+.{
+    .name = .scroll_table_and_list,
+    .version = "0.0.0",
+    .fingerprint = 0x827d208bbcf48a24,
+    .minimum_zig_version = "0.15.1",
+    .dependencies = .{
+        .adl = .{
+            .path = "../../",
+        },
+        .raylib_zig = .{
+            .url = "git+https://github.com/raylib-zig/raylib-zig?ref=devel#9ad8b8ba7432642acc336d17539e73c3fb9ac300",
+            .hash = "raylib_zig-5.6.0-dev-KE8REK4zBQA5y8W9NTGXGHM3YKFtS5UDttcwZ4GTZSau",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
