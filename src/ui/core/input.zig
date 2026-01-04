@@ -33,7 +33,7 @@ pub const MouseState = struct {
     pos: types.Vector2 = .{ .x = 0, .y = 0 },
     prev_pos: types.Vector2 = .{ .x = 0, .y = 0 },
     delta: types.Vector2 = .{ .x = 0, .y = 0 },
-    wheel_move: f32 = 0,
+    wheel_move: types.Vector2 = .{ .x = 0, .y = 0 },
 
     left_button: MouseButtonState = .{},
     right_button: MouseButtonState = .{},
@@ -46,7 +46,7 @@ pub const InputBackend = struct {
 
     // Core functions
     getMousePosition: *const fn (ctx: *anyopaque) types.Vector2,
-    getMouseWheelMove: *const fn (ctx: *anyopaque) f32,
+    getMouseWheelMove: *const fn (ctx: *anyopaque) types.Vector2,
     isMouseButtonDown: *const fn (ctx: *anyopaque, button: types.MouseButton) bool,
     isKeyDown: *const fn (ctx: *anyopaque, key: types.Key) bool,
     getKeyPressed: *const fn (ctx: *anyopaque) ?types.Key,

@@ -69,8 +69,6 @@ fn simulationJob(jobs: *Jobs, ctx_ptr: *anyopaque) JobOutcome {
 const HomeScreen = struct {
     allocator: std.mem.Allocator,
     text_buffer: std.ArrayList(u8),
-    textbox_state: adl.ui.textbox.State = .{},
-    scroll_state: adl.ui.scroll_area.State = .{},
 
     pub fn init(allocator: std.mem.Allocator, _: ?RouteArgs) !HomeScreen {
         return HomeScreen{
@@ -84,27 +82,25 @@ const HomeScreen = struct {
     }
 
     pub fn render(self: *HomeScreen) void {
-        const ui_ctx = g_ctx.ui;
-        // Create the UI facade
-        const ui = adl.ui.UI.init(ui_ctx);
+        const ui = adl.ui;
 
         // Access state safely
         const state = g_ctx.store.getCopy();
 
-        cl.UI()(.{ .id = cl.ElementId.localID("MainContainer"), .layout = .{ .direction = .top_to_bottom, .sizing = .grow, .padding = .all(20), .child_gap = 10, .child_alignment = .{ .x = .center, .y = .center } } })({
+        cl.UI()(.{ .id = cl.ElementId.ID("MainContainer"), .layout = .{ .direction = .top_to_bottom, .sizing = .grow, .padding = .all(20), .child_gap = 10, .child_alignment = .{ .x = .center, .y = .center } } })({
             cl.text("ADL Basic Example", .{ .font_size = 32, .color = .{ 200, 200, 200, 255 } });
 
             cl.text(std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Counter: {}", .{state.counter}) catch "Counter: ?", .{ .font_size = 24, .color = .{ 150, 150, 150, 255 } });
 
             cl.text(std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Last Job Result: {}", .{state.last_job_result}) catch "Result: ?", .{ .font_size = 24, .color = .{ 150, 150, 150, 255 } });
 
-            // Example: Textbox (New Pattern)
-            ui.textbox(cl.ElementId.localID("my_input"), &self.textbox_state, &self.text_buffer, .{
+            // Example: Textbox
+            ui.textbox("my_input", &self.text_buffer, .{
                 .placeholder = "Enter number to add...",
             });
 
-            // Example: Scroll Area (New Pattern)
-            ui.scrollArea(cl.ElementId.localID("scroll_area"), &self.scroll_state, .{ .content_height = 200 }, struct {
+            // Example: Scroll Area
+            ui.scrollArea("scroll_area", .{ .content_height = 200 }, struct {
                 fn render() void {
                     cl.text("I am inside a scroll area!", .{ .font_size = 20, .color = .{ 255, 255, 255, 255 } });
                     cl.text("Me too!", .{ .font_size = 20, .color = .{ 200, 200, 200, 255 } });
@@ -118,7 +114,7 @@ const HomeScreen = struct {
             }.render);
 
             // Render buttons normally
-            if (ui.button(cl.ElementId.localID("btn_inc"), .{ .text = "Increment Counter", .variant = .primary })) {
+            if (ui.button("btn_inc", .{ .text = "Increment Counter", .variant = .primary })) {
                 {
                     const guard = g_ctx.store.write();
                     defer guard.release();
@@ -127,7 +123,7 @@ const HomeScreen = struct {
                 std.log.info("Button clicked! Counter: {}", .{state.counter});
             }
 
-            if (ui.button(cl.ElementId.localID("btn_job"), .{ .text = if (state.loading) "Processing..." else "Run Background Job", .is_disabled = state.loading, .variant = .accent })) {
+            if (ui.button("btn_job", .{ .text = if (state.loading) "Processing..." else "Run Background Job", .is_disabled = state.loading, .variant = .accent })) {
                 // Parse input
                 const input_val = std.fmt.parseInt(u32, self.text_buffer.items, 10) catch 0;
 
@@ -164,24 +160,23 @@ pub fn main() !void {
     try jobs.start();
     defer jobs.deinit();
 
-    // 2. Init Router
-    var router = try Router.init(allocator, .{});
-    defer router.deinit();
+    // Create rendering backend
+    const backend = adl_rl.createInputBackend();
 
+    // 2. Init UI
+    const theme = Theme.init();
+
+    var ui_ctx = try UIContext.init(allocator, &theme, adl_rl.measureText, backend);
+    defer ui_ctx.deinit();
+
+    // 3. Init Router
+    var router = try Router.init(allocator, .{});
+    defer router.deinit(&ui_ctx);
     try router.register("/", HomeScreen, null);
 
     // 3. Init Store
     var store = Store(AppState).init(allocator, .{});
     defer store.deinit();
-
-    // 4. Init UI
-    const theme = Theme.init();
-
-    // Create Backend
-    const backend = adl_rl.createInputBackend();
-
-    var ui_ctx = try UIContext.init(allocator, &theme, adl_rl.measureText, backend);
-    defer ui_ctx.deinit();
 
     // Init Clay
     const min_memory_size = cl.minMemorySize();
@@ -213,7 +208,7 @@ pub fn main() !void {
     std.log.info("System initialized. Starting loop...", .{});
 
     // Navigate to home
-    try router.navigate("/");
+    try router.navigate(&ui_ctx, "/");
 
     while (!rl.windowShouldClose()) {
         const delta_time = rl.getFrameTime();
@@ -240,7 +235,7 @@ pub fn main() !void {
         // --- Clay Layout Phase ---
         cl.beginLayout();
         cl.UI()(.{ .id = cl.ElementId.ID("Root"), .layout = .{ .sizing = .grow, .direction = .top_to_bottom }, .background_color = .{ 30, 30, 30, 255 } })({
-            router.render();
+            router.render(&ui_ctx);
         });
         const commands = cl.endLayout();
         // -------------------------

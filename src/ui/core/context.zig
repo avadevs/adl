@@ -4,6 +4,10 @@ const t = @import("./theme.zig");
 const input = @import("./input.zig");
 const types = @import("./types.zig");
 
+/// Thread-local pointer to the active UIContext.
+/// This allows "implicit context" usage in the API.
+threadlocal var current_instance: ?*UIContext = null;
+
 /// UIContext holds the global state for the entire UI for a single frame.
 /// A pointer to this struct is passed to every UI component. It is the "single
 /// source of truth" for global state like input, focus, and styling.
@@ -56,17 +60,171 @@ pub const UIContext = struct {
     /// the blinking cursor in a textbox.
     anim_timer: f32 = 0,
 
+    // --- Scoped Registry ---
+    // Stores UI state (cursor pos, scroll offset) organized by scope.
+    // Outer Key: Scope ID (Pointer to Screen/Parent)
+    // Inner Key: Element ID (Hash of user string)
+    scopes: std.AutoHashMap(u64, std.AutoHashMap(u64, types.WidgetState)),
+
+    // Stack for nested scopes (e.g. Modals -> Panels -> etc)
+    scope_stack: std.ArrayList(u64),
+
     pub fn init(allocator: std.mem.Allocator, theme: *const t.THEME, measure_text_fn: ?*const fn (clay_text: []const u8, config: *cl.TextElementConfig, _: void) cl.Dimensions, backend: input.InputBackend) !UIContext {
         return .{
             .allocator = allocator,
             .theme = theme,
             .measure_text_fn = measure_text_fn,
             .input = try input.InputManager.init(allocator, backend),
+            .scopes = std.AutoHashMap(u64, std.AutoHashMap(u64, types.WidgetState)).init(allocator),
+            .scope_stack = try std.ArrayList(u64).initCapacity(allocator, 16),
         };
     }
 
     pub fn deinit(self: *UIContext) void {
         self.input.deinit();
+
+        // Cleanup all scopes
+        var scope_iter = self.scopes.iterator();
+        while (scope_iter.next()) |scope_entry| {
+            var state_iter = scope_entry.value_ptr.iterator();
+            while (state_iter.next()) |state_entry| {
+                self.freeWidgetState(state_entry.value_ptr);
+            }
+            scope_entry.value_ptr.deinit();
+        }
+        self.scopes.deinit();
+        self.scope_stack.deinit(self.allocator);
+    }
+
+    /// Sets this UIContext as the active one for the current thread.
+    /// This allows the usage of the `ui` namespace functions without explicitly passing the context.
+    pub fn makeCurrent(self: *UIContext) void {
+        current_instance = self;
+    }
+
+    /// Retrieves the active UIContext for the current thread.
+    /// Panics if no context is active (safety check).
+    pub fn getCurrent() *UIContext {
+        if (current_instance) |ctx| return ctx;
+        @panic("No UIContext is active on this thread! Did you forget to call ui_ctx.makeCurrent()?");
+    }
+
+    /// Helper to free any allocated memory within a WidgetState
+    fn freeWidgetState(self: *UIContext, state: *types.WidgetState) void {
+        switch (state.*) {
+            .custom => |wrapper| {
+                wrapper.deinit_fn(wrapper.data, self.allocator);
+            },
+            else => {}, // POD states don't need cleanup
+        }
+    }
+
+    // --- Scope Management ---
+
+    /// Pushes a new scope ID onto the stack. All subsequent widget IDs will be looked up within this scope.
+    /// Typically called automatically by the Router/Screen.
+    pub fn beginScope(self: *UIContext, scope_id: u64) !void {
+        try self.scope_stack.append(self.allocator, scope_id);
+    }
+
+    /// Pops the current scope from the stack.
+    pub fn endScope(self: *UIContext) void {
+        if (self.scope_stack.items.len > 0) {
+            _ = self.scope_stack.pop();
+        } else {
+            std.log.warn("Attempted to endScope() but stack was empty!", .{});
+        }
+    }
+
+    /// Destroys all state associated with a scope.
+    /// Called by the Router when a Screen is deinitialized.
+    pub fn freeScope(self: *UIContext, scope_id: u64) void {
+        if (self.scopes.fetchRemove(scope_id)) |kv| {
+            var inner_map = kv.value;
+            var iter = inner_map.iterator();
+            while (iter.next()) |entry| {
+                self.freeWidgetState(entry.value_ptr);
+            }
+            inner_map.deinit();
+        }
+    }
+
+    // --- State Access ---
+
+    /// Retrieves or initializes a standard widget state (Textbox, Scroll, etc).
+    /// Uses the current active scope.
+    pub fn getWidgetState(self: *UIContext, id: u64, default_state: types.WidgetState) *types.WidgetState {
+        const current_scope = if (self.scope_stack.items.len > 0)
+            self.scope_stack.getLast()
+        else
+            0; // Default/Global scope
+
+        const scope_map_result = self.scopes.getOrPut(current_scope) catch @panic("OOM in getWidgetState (scope)");
+        if (!scope_map_result.found_existing) {
+            scope_map_result.value_ptr.* = std.AutoHashMap(u64, types.WidgetState).init(self.allocator);
+        }
+
+        const state_map = scope_map_result.value_ptr;
+        const state_result = state_map.getOrPut(id) catch @panic("OOM in getWidgetState (state)");
+
+        if (!state_result.found_existing) {
+            state_result.value_ptr.* = default_state;
+        }
+
+        return state_result.value_ptr;
+    }
+
+    /// Retrieves or initializes a generic custom widget state.
+    /// Used for third-party extensions.
+    pub fn getOrInitCustom(self: *UIContext, id: u64, comptime T: type) *T {
+        const current_scope = if (self.scope_stack.items.len > 0)
+            self.scope_stack.getLast()
+        else
+            0;
+
+        const scope_map_result = self.scopes.getOrPut(current_scope) catch @panic("OOM in getOrInitCustom (scope)");
+        if (!scope_map_result.found_existing) {
+            scope_map_result.value_ptr.* = std.AutoHashMap(u64, types.WidgetState).init(self.allocator);
+        }
+
+        const state_map = scope_map_result.value_ptr;
+        const entry = state_map.getOrPut(id) catch @panic("OOM in getOrInitCustom (state)");
+
+        // Verification & Initialization
+        if (entry.found_existing) {
+            if (entry.value_ptr.* == .custom) {
+                const wrapper = entry.value_ptr.custom;
+                // Type safety check
+                if (wrapper.type_id == @intFromPtr(T)) {
+                    return @ptrCast(@alignCast(wrapper.data));
+                }
+            }
+            // Collision or Type Mismatch: Overwrite
+            self.freeWidgetState(entry.value_ptr);
+        }
+
+        // Initialize new
+        const ptr = self.allocator.create(T) catch @panic("OOM allocating custom state");
+        ptr.* = T{}; // Default init
+
+        // Generate cleanup function
+        const gen = struct {
+            fn deinit_impl(raw: *anyopaque, alloc: std.mem.Allocator) void {
+                const self_ptr: *T = @ptrCast(@alignCast(raw));
+                if (@hasDecl(T, "deinit")) {
+                    self_ptr.deinit();
+                }
+                alloc.destroy(self_ptr);
+            }
+        };
+
+        entry.value_ptr.* = .{ .custom = .{
+            .data = ptr,
+            .type_id = @intFromPtr(T),
+            .deinit_fn = gen.deinit_impl,
+        } };
+
+        return ptr;
     }
 
     /// Call this at the beginning of each frame's UI rendering pass.
@@ -89,8 +247,8 @@ pub fn dummyMeasureText(_: []const u8, _: *cl.TextElementConfig, _: void) cl.Dim
 fn dummyGetMousePos(_: *anyopaque) types.Vector2 {
     return .{};
 }
-fn dummyGetMouseWheel(_: *anyopaque) f32 {
-    return 0;
+fn dummyGetMouseWheel(_: *anyopaque) types.Vector2 {
+    return .{ .x = 0, .y = 0 };
 }
 fn dummyIsBtnDown(_: *anyopaque, _: types.MouseButton) bool {
     return false;
@@ -147,4 +305,48 @@ test "UIContext init and beginFrame logic" {
     try expect(ctx.hot_id == null); // hot_id should be reset
     try expect(ctx.focused_id != null and ctx.focused_id.?.id == cl.ElementId.init(2).id); // focused_id should persist
     try expect(ctx.anim_timer == 10.0 + delta_time); // anim_timer should be incremented
+}
+
+test "UIContext Scoped State" {
+    const allocator = std.testing.allocator;
+    const dummy_backend = input.InputBackend{
+        .context = undefined,
+        .getMousePosition = dummyGetMousePos,
+        .getMouseWheelMove = dummyGetMouseWheel,
+        .isMouseButtonDown = dummyIsBtnDown,
+        .isKeyDown = dummyIsKeyDown,
+        .getKeyPressed = dummyGetKeyPressed,
+        .getCharPressed = dummyGetCharPressed,
+        .setMouseCursor = dummySetMouseCursor,
+    };
+    var theme = t.THEME.init();
+    var ctx = try UIContext.init(allocator, &theme, &dummyMeasureText, dummy_backend);
+    defer ctx.deinit();
+
+    // Setup implicit context
+    ctx.makeCurrent();
+
+    // 1. Begin Scope
+    try ctx.beginScope(12345);
+
+    // 2. Init State
+    const id = 10;
+    const state = ctx.getWidgetState(id, .{ .textbox = .{} });
+    state.textbox.cursor_pos = 99;
+
+    // 3. Verify State Persists
+    const state_2 = ctx.getWidgetState(id, .{ .textbox = .{} });
+    try std.testing.expectEqual(@as(usize, 99), state_2.textbox.cursor_pos);
+
+    // 4. End Scope
+    ctx.endScope();
+
+    // 5. Free Scope
+    ctx.freeScope(12345);
+
+    // 6. Verify Cleanup
+    // Re-enter scope, state should be reset (new default)
+    try ctx.beginScope(12345);
+    const state_3 = ctx.getWidgetState(id, .{ .textbox = .{} });
+    try std.testing.expectEqual(@as(usize, 0), state_3.textbox.cursor_pos);
 }

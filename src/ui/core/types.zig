@@ -155,3 +155,56 @@ pub const ScrollState = struct {
     drag_start_mouse_x: f32 = 0,
     drag_start_scroll_x: f32 = 0,
 };
+
+/// Specifies the sort direction for tables.
+pub const SortDirection = enum {
+    asc,
+    desc,
+
+    pub fn opposite(self: SortDirection) SortDirection {
+        return switch (self) {
+            .asc => .desc,
+            .desc => .asc,
+        };
+    }
+};
+
+/// Interaction state for a scroll list.
+pub const ScrollListState = struct {
+    scroll: ScrollState = .{},
+    selected_index: ?usize = null,
+};
+
+/// Interaction state for a scroll table.
+pub const ScrollTableState = struct {
+    scroll: ScrollState = .{},
+    selected_index: ?usize = null,
+    sort_column_index: ?usize = null,
+    sort_direction: SortDirection = .asc,
+};
+
+/// A type-erased wrapper for custom third-party widget states.
+/// This allows users to store their own heap-allocated states in the registry.
+pub const CustomStateWrapper = struct {
+    /// Pointer to the user's heap-allocated struct
+    data: *anyopaque,
+
+    /// Unique ID for the type (to ensure type safety)
+    type_id: usize,
+
+    /// Function to free the memory (and call .deinit() if it exists)
+    deinit_fn: *const fn (ptr: *anyopaque, allocator: std.mem.Allocator) void,
+};
+
+/// A union of all possible widget states.
+pub const WidgetState = union(enum) {
+    textbox: TextboxState,
+    scroll_area: ScrollState,
+    scroll_list: ScrollListState,
+    scroll_table: ScrollTableState,
+
+    /// Extension point for user-defined widgets
+    custom: CustomStateWrapper,
+
+    none,
+};

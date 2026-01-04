@@ -28,7 +28,7 @@ pub const Options = struct {
 pub const State = TextboxState;
 
 const InternalState = struct {
-    state: *State,
+    id_hash: u64,
     text: *std.ArrayList(u8),
     ctx: *UIContext,
     options: Options,
@@ -38,8 +38,11 @@ const InternalState = struct {
 fn onHoverCallback(id: cl.ElementId, pointerInfo: cl.PointerData, internal_ptr: *InternalState) void {
     const ctx = internal_ptr.ctx;
     const options = internal_ptr.options;
-    const state = internal_ptr.state;
     const text = internal_ptr.text;
+
+    // Retrieve state safely (re-lookup to handle potential pointer invalidation)
+    const state_ptr = ctx.getWidgetState(internal_ptr.id_hash, .{ .textbox = .{} });
+    const state = &state_ptr.textbox;
 
     // Change the mouse cursor to the I-beam to indicate text input.
     ctx.input.setMouseCursor(.ibeam);
@@ -79,36 +82,31 @@ fn onHoverCallback(id: cl.ElementId, pointerInfo: cl.PointerData, internal_ptr: 
 ///
 /// Usage:
 /// ```zig
-/// // In your parent UI's state struct:
-/// var textbox_state: textbox.State = .{};
-/// var text_buffer = std.ArrayList(u8).init(allocator);
-///
-/// // In your render function:
-/// textbox.render(ctx, .localID("my_textbox"), &textbox_state, &text_buffer, .{
+/// ui.textbox("my_textbox", &text_buffer, .{
 ///     .placeholder = "Enter text...",
 /// });
 /// ```
-pub fn render(ctx: *UIContext, id: cl.ElementId, state: *State, text: *std.ArrayList(u8), options: Options) void {
+pub fn render(id_str: []const u8, text: *std.ArrayList(u8), options: Options) void {
+    const ctx = UIContext.getCurrent();
+    const id_hash = std.hash.Wyhash.hash(0, id_str);
+
+    // Retrieve/Init State
+    const state_ptr = ctx.getWidgetState(id_hash, .{ .textbox = .{} });
+    const state = &state_ptr.textbox;
+
     // Determine theme
     const theme = t.merge(ctx.theme.*, options.theme_overrides);
 
     // We create a temporary struct to pass context to the callback
-    // Note: This relies on the frame allocator or stack memory being valid during the callback
-    // Since callbacks happen immediately in Clay (usually), this is often okay, but for safety
-    // we should allocate this on the frame allocator if we can, or just trust that onHoverCallback
-    // is called during the cl.UI() call or we need a way to pass data.
-    //
-    // In this specific implementation, cl.onHover stores the pointer.
-    // We must ensure the data pointed to survives until the callback fires.
-    // Since we are inside render, we can allocate this on the frame allocator.
     const internal_ptr = ctx.frame_allocator.create(InternalState) catch return;
     internal_ptr.* = .{
-        .state = state,
+        .id_hash = id_hash,
         .text = text,
         .ctx = ctx,
         .options = options,
     };
 
+    const id = cl.ElementId.ID(id_str);
     const is_focused = ctx.focused_id != null and ctx.focused_id.?.id == id.id;
 
     // Handle keyboard input only if this textbox is focused.
@@ -121,7 +119,7 @@ pub fn render(ctx: *UIContext, id: cl.ElementId, state: *State, text: *std.Array
                 const char = @as(u8, @intCast(char_code));
                 // Insert char
                 if (state.cursor_pos <= text.items.len) {
-                    text.insert(text.allocator, state.cursor_pos, char) catch {};
+                    text.insert(ctx.frame_allocator, state.cursor_pos, char) catch {};
                     state.cursor_pos += 1;
                 }
             }

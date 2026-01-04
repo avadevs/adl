@@ -5,9 +5,9 @@
 /// (mouse wheel, drag), calculates virtualization ranges, and returns a struct
 /// (`ScrollLayout`) with all the necessary data for the caller to render the UI.
 const std = @import("std");
-const rl = @import("raylib");
 const cl = @import("zclay");
 const UIContext = @import("../core/context.zig").UIContext;
+const types = @import("../core/types.zig");
 
 /// Configuration options for the scroll container logic.
 pub const Options = struct {
@@ -21,18 +21,11 @@ pub const Options = struct {
 
 /// Holds the persistent scrolling state for the container.
 /// This is owned and managed by the parent UI.
-pub const State = struct {
-    scroll_offset: cl.Vector2 = .{ .x = 0, .y = 0 },
-    is_dragging_thumb_y: bool = false,
-    drag_start_mouse_y: f32 = 0,
-    drag_start_scroll_y: f32 = 0,
-    is_dragging_thumb_x: bool = false,
-    drag_start_mouse_x: f32 = 0,
-    drag_start_scroll_x: f32 = 0,
-};
+pub const State = types.ScrollState;
 
 pub const Scrollbar = struct {
     is_needed: bool,
+
     track_id: cl.ElementId,
     thumb_id: cl.ElementId,
     thumb_axis: f32,
@@ -57,7 +50,6 @@ pub fn useScrollContainer(
     id: cl.ElementId,
     state: *State,
     options: Options,
-    mouse_wheel: cl.Vector2,
 ) ScrollLayout {
     const viewport_box = cl.getElementData(id).bounding_box;
 
@@ -74,12 +66,24 @@ pub fn useScrollContainer(
         .top_spacer_height = 0,
         .bottom_spacer_height = 0,
         .viewport_dims = .{ .w = viewport_width, .h = viewport_height },
-        .v_scrollbar = .{ .is_needed = v_scroll_needed, .track_id = cl.ElementId.localID("v_track"), .thumb_id = cl.ElementId.localID("v_thumb"), .thumb_axis = 0, .thumb_size = 0 },
-        .h_scrollbar = .{ .is_needed = h_scroll_needed, .track_id = cl.ElementId.localID("h_track"), .thumb_id = cl.ElementId.localID("h_thumb"), .thumb_axis = 0, .thumb_size = 0 },
+        .v_scrollbar = .{
+            .is_needed = v_scroll_needed,
+            .track_id = cl.ElementId.localIDI("v_track", id.id),
+            .thumb_id = cl.ElementId.localIDI("v_thumb", id.id),
+            .thumb_axis = 0,
+            .thumb_size = 0,
+        },
+        .h_scrollbar = .{
+            .is_needed = h_scroll_needed,
+            .track_id = cl.ElementId.localIDI("h_track", id.id),
+            .thumb_id = cl.ElementId.localIDI("h_thumb", id.id),
+            .thumb_axis = 0,
+            .thumb_size = 0,
+        },
     };
 
     // --- Input Handling ---
-    if (cl.pointerOver(id) and rl.isMouseButtonPressed(.left)) {
+    if (cl.pointerOver(id) and ctx.input.getMouse().left_button.isPressed()) {
         ctx.focused_id = id;
     }
 
@@ -96,12 +100,12 @@ pub fn useScrollContainer(
 
     // Vertical scrollbar interaction
     if (v_scroll_needed) {
-        if (cl.pointerOver(layout.v_scrollbar.thumb_id) and rl.isMouseButtonPressed(.left)) {
+        if (cl.pointerOver(layout.v_scrollbar.thumb_id) and ctx.input.getMouse().left_button.isPressed()) {
             state.is_dragging_thumb_y = true;
             state.drag_start_mouse_y = ctx.input.getMouse().pos.y;
             state.drag_start_scroll_y = state.scroll_offset.y;
             ctx.active_id = layout.v_scrollbar.thumb_id;
-        } else if (cl.pointerOver(layout.v_scrollbar.track_id) and rl.isMouseButtonPressed(.left)) {
+        } else if (cl.pointerOver(layout.v_scrollbar.track_id) and ctx.input.getMouse().left_button.isPressed()) {
             if (!state.is_dragging_thumb_y) {
                 const thumb_h = @max(20, viewport_height * (viewport_height / options.total_content_dims.h));
                 const click_y_relative = ctx.input.getMouse().pos.y - cl.getElementData(layout.v_scrollbar.track_id).bounding_box.y;
@@ -118,6 +122,7 @@ pub fn useScrollContainer(
         const scroll_ratio = if (viewport_height > 0) options.total_content_dims.h / viewport_height else 1.0;
         state.scroll_offset.y = state.drag_start_scroll_y + (mouse_delta_y * scroll_ratio);
     } else if (cl.pointerOver(id)) {
+        const mouse_wheel = ctx.input.getMouse().wheel_move;
         if (v_scroll_needed) {
             state.scroll_offset.y -= mouse_wheel.y;
         }

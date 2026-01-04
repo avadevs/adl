@@ -18,8 +18,9 @@ fn getMousePosition(_: *anyopaque) types.Vector2 {
     return .{ .x = pos.x, .y = pos.y };
 }
 
-fn getMouseWheelMove(_: *anyopaque) f32 {
-    return rl.getMouseWheelMove();
+fn getMouseWheelMove(_: *anyopaque) types.Vector2 {
+    const wheel = rl.getMouseWheelMoveV();
+    return .{ .x = wheel.x, .y = wheel.y };
 }
 
 fn isMouseButtonDown(_: *anyopaque, button: types.MouseButton) bool {

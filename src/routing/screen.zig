@@ -1,5 +1,6 @@
 const std = @import("std");
 const RouteArgs = @import("route.zig").RouteArgs;
+const UIContext = @import("../ui/core/context.zig").UIContext;
 
 /// The type-erased interface for any screen managed by the router.
 /// Internal use only. User code should not implement this directly.
@@ -9,18 +10,18 @@ pub const AnyScreen = struct {
 
     pub const VTable = struct {
         /// Called to render the screen. Should be lightweight.
-        render: *const fn (ptr: *anyopaque) void,
+        render: *const fn (ptr: *anyopaque, ctx: *UIContext) void,
 
         /// Called to update an existing screen with new arguments.
         /// Returns true if the update was handled, false if the router should recreate the screen.
         update: ?*const fn (ptr: *anyopaque, args: ?RouteArgs) anyerror!bool,
 
         /// Called to destroy the screen and free its resources.
-        deinit: *const fn (ptr: *anyopaque) void,
+        deinit: *const fn (ptr: *anyopaque, ctx: *UIContext) void,
     };
 
-    pub fn render(self: AnyScreen) void {
-        self.vtable.render(self.ptr);
+    pub fn render(self: AnyScreen, ctx: *UIContext) void {
+        self.vtable.render(self.ptr, ctx);
     }
 
     pub fn update(self: AnyScreen, args: ?RouteArgs) !bool {
@@ -30,8 +31,8 @@ pub const AnyScreen = struct {
         return false;
     }
 
-    pub fn deinit(self: AnyScreen) void {
-        self.vtable.deinit(self.ptr);
+    pub fn deinit(self: AnyScreen, ctx: *UIContext) void {
+        self.vtable.deinit(self.ptr, ctx);
     }
 };
 
@@ -71,8 +72,12 @@ pub const ScreenFactory = struct {
                 .deinit = deinitImpl,
             };
 
-            fn renderImpl(ptr: *anyopaque) void {
+            fn renderImpl(ptr: *anyopaque, ctx: *UIContext) void {
                 const self: *T = @ptrCast(@alignCast(ptr));
+                // Automatically manage scope for this screen instance
+                ctx.beginScope(@intFromPtr(self)) catch {};
+                defer ctx.endScope();
+
                 self.render();
             }
 
@@ -82,9 +87,11 @@ pub const ScreenFactory = struct {
                 return true;
             }
 
-            fn deinitImpl(ptr: *anyopaque) void {
+            fn deinitImpl(ptr: *anyopaque, ctx: *UIContext) void {
                 const self: *T = @ptrCast(@alignCast(ptr));
                 self.deinit();
+                // Clean up all UI state associated with this screen instance
+                ctx.freeScope(@intFromPtr(self));
                 self.allocator.destroy(self);
             }
         };
