@@ -109,6 +109,9 @@ pub fn render(id_str: []const u8, text: *std.ArrayList(u8), options: Options) !v
     const id = cl.ElementId.ID(id_str);
     const is_focused = ctx.focused_id != null and ctx.focused_id.?.id == id.id;
 
+    // Register for focus navigation
+    ctx.registerFocusable(id);
+
     // Handle keyboard input only if this textbox is focused.
     if (is_focused) {
         while (true) {

@@ -65,6 +65,12 @@ pub const UIContext = struct {
     /// the blinking cursor in a textbox.
     anim_timer: f32 = 0,
 
+    /// Double-buffered lists for tracking focusable elements in order.
+    /// 'prev' contains the IDs from the last frame (used for navigation logic).
+    /// 'curr' gathers IDs during the current frame's render pass.
+    prev_frame_focusables: std.ArrayList(cl.ElementId),
+    curr_frame_focusables: std.ArrayList(cl.ElementId),
+
     // --- Scoped Registry ---
     // Stores UI state (cursor pos, scroll offset) organized by scope.
     // Outer Key: Scope ID (Pointer to Screen/Parent)
@@ -82,11 +88,15 @@ pub const UIContext = struct {
             .input = try input.InputManager.init(allocator, backend),
             .scopes = std.AutoHashMap(u64, std.AutoHashMap(u64, types.WidgetState)).init(allocator),
             .scope_stack = try std.ArrayList(u64).initCapacity(allocator, 16),
+            .prev_frame_focusables = try std.ArrayList(cl.ElementId).initCapacity(allocator, 64),
+            .curr_frame_focusables = try std.ArrayList(cl.ElementId).initCapacity(allocator, 64),
         };
     }
 
     pub fn deinit(self: *UIContext) void {
         self.input.deinit();
+        self.prev_frame_focusables.deinit(self.allocator);
+        self.curr_frame_focusables.deinit(self.allocator);
 
         // Cleanup all scopes
         var scope_iter = self.scopes.iterator();
@@ -152,6 +162,18 @@ pub const UIContext = struct {
             }
             inner_map.deinit();
         }
+    }
+
+    // --- Focus Registry ---
+
+    /// Registers an element as focusable for the current frame.
+    /// This should be called by any interactive widget (Button, Textbox, etc.) during its render function.
+    pub fn registerFocusable(self: *UIContext, id: cl.ElementId) void {
+        self.curr_frame_focusables.append(self.allocator, id) catch {
+            // If we run out of memory tracking focusables, we just silently fail to register it.
+            // In a real app we might log this, but for UI it's often better to not crash.
+            return;
+        };
     }
 
     // --- State Access ---
@@ -235,6 +257,54 @@ pub const UIContext = struct {
     /// Call this at the beginning of each frame's UI rendering pass.
     pub fn beginFrame(self: *UIContext, delta_time: f32) void {
         self.input.update(delta_time) catch {}; // Update input state
+
+        // --- Focus Navigation Logic ---
+        // 1. Swap buffers: curr -> prev, and clear curr for new frame
+        // We reuse the memory of 'prev' for the new 'curr' to avoid reallocations.
+        const temp = self.prev_frame_focusables;
+        self.prev_frame_focusables = self.curr_frame_focusables;
+        self.curr_frame_focusables = temp;
+        self.curr_frame_focusables.clearRetainingCapacity();
+
+        // 2. Handle Tab Navigation
+        if (self.input.getKey(.tab).isPressed()) {
+            const is_shift = self.input.getKey(.left_shift).is_down or self.input.getKey(.right_shift).is_down;
+            const list = self.prev_frame_focusables.items;
+
+            if (list.len > 0) {
+                var new_index: usize = 0;
+
+                // Find current index
+                var found_current = false;
+                if (self.focused_id) |current_id| {
+                    for (list, 0..) |id, i| {
+                        if (id.id == current_id.id) {
+                            if (is_shift) {
+                                // Backward
+                                new_index = if (i == 0) list.len - 1 else i - 1;
+                            } else {
+                                // Forward
+                                new_index = if (i == list.len - 1) 0 else i + 1;
+                            }
+                            found_current = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If no focus currently, or ID not found, start at 0 (or end if shift)
+                if (!found_current) {
+                    if (is_shift) {
+                        new_index = list.len - 1;
+                    } else {
+                        new_index = 0;
+                    }
+                }
+
+                self.focused_id = list[new_index];
+            }
+        }
+
         // Hot is always reset at the start of the frame. Components will re-declare
         // themselves as hot if the mouse is over them.
         self.hot_id = null;
@@ -354,4 +424,122 @@ test "UIContext Scoped State" {
     try ctx.beginScope(12345);
     const state_3 = try ctx.getWidgetState(id, .{ .textbox = .{} });
     try std.testing.expectEqual(@as(usize, 0), state_3.textbox.cursor_pos);
+}
+
+test "UIContext Focus Navigation" {
+    const allocator = std.testing.allocator;
+    const expect = std.testing.expect;
+
+    // specialized mock for this test
+    const MockCtx = struct {
+        tab_down: bool = false,
+        shift_down: bool = false,
+        key_consumed: bool = false,
+    };
+    var mock_data = MockCtx{};
+
+    const mock_funcs = struct {
+        fn isKeyDown(ctx: *anyopaque, key: types.Key) bool {
+            const self: *MockCtx = @ptrCast(@alignCast(ctx));
+            if (key == .left_shift) return self.shift_down;
+            if (key == .tab) return self.tab_down;
+            return false;
+        }
+        fn getKeyPressed(ctx: *anyopaque) ?types.Key {
+            const self: *MockCtx = @ptrCast(@alignCast(ctx));
+            if (self.tab_down and !self.key_consumed) {
+                self.key_consumed = true;
+                return .tab;
+            }
+            return null;
+        }
+        // Dummies
+        fn dummyGetMousePos(_: *anyopaque) types.Vector2 {
+            return .{};
+        }
+        fn dummyGetMouseWheel(_: *anyopaque) types.Vector2 {
+            return .{};
+        }
+        fn dummyIsMouseButtonDown(_: *anyopaque, _: types.MouseButton) bool {
+            return false;
+        }
+        fn dummyGetCharPressed(_: *anyopaque) u32 {
+            return 0;
+        }
+        fn dummySetMouseCursor(_: *anyopaque, _: types.CursorShape) void {}
+    };
+
+    const backend = input.InputBackend{
+        .context = &mock_data,
+        .getMousePosition = mock_funcs.dummyGetMousePos,
+        .getMouseWheelMove = mock_funcs.dummyGetMouseWheel,
+        .isMouseButtonDown = mock_funcs.dummyIsMouseButtonDown,
+        .isKeyDown = mock_funcs.isKeyDown,
+        .getKeyPressed = mock_funcs.getKeyPressed, // returns Tab if down
+        .getCharPressed = mock_funcs.dummyGetCharPressed,
+        .setMouseCursor = mock_funcs.dummySetMouseCursor,
+    };
+
+    var theme = t.THEME.init();
+    var ctx = try UIContext.init(allocator, &theme, &dummyMeasureText, backend);
+    defer ctx.deinit();
+
+    // IDs
+    const id1 = cl.ElementId.init(100);
+    const id2 = cl.ElementId.init(200);
+    const id3 = cl.ElementId.init(300);
+
+    // Frame 1: Register elements. No input.
+    ctx.beginFrame(0.1);
+    ctx.registerFocusable(id1);
+    ctx.registerFocusable(id2);
+    ctx.registerFocusable(id3);
+
+    // Check internal state: curr has items, prev empty
+    try expect(ctx.curr_frame_focusables.items.len == 3);
+    try expect(ctx.prev_frame_focusables.items.len == 0);
+
+    // Frame 2: Press Tab. Should focus first element (id1).
+    // Note: To make "isPressed" work in InputManager, we need it to be NOT down in previous frame, and DOWN in this frame.
+    // Frame 1 had tab_down = false.
+    mock_data.tab_down = true;
+    mock_data.key_consumed = false;
+
+    ctx.beginFrame(0.1);
+    // At start of frame 2:
+    // 1. InputManager sees Tab pressed.
+    // 2. Buffers swapped: prev has [100, 200, 300], curr empty.
+    // 3. Logic sees Tab -> focuses prev[0] (id1).
+
+    try expect(ctx.focused_id != null);
+    if (ctx.focused_id) |fid| {
+        try expect(fid.id == id1.id);
+    }
+
+    // Simulate render again to keep lists populated
+    ctx.registerFocusable(id1);
+    ctx.registerFocusable(id2);
+    ctx.registerFocusable(id3);
+
+    // Frame 3: Press Tab again. Focus -> id2.
+    // To trigger "isPressed" again, we usually need a release in between or repeat logic.
+    // InputManager's "isPressed" is (is_down && !was_down).
+    // So we need to release first, or rely on repeat.
+    // Let's simulate a release frame first.
+    mock_data.tab_down = false;
+    mock_data.key_consumed = false;
+    ctx.beginFrame(0.1);
+    ctx.registerFocusable(id1);
+    ctx.registerFocusable(id2);
+    ctx.registerFocusable(id3);
+
+    // Now press again
+    mock_data.tab_down = true;
+    mock_data.key_consumed = false;
+    ctx.beginFrame(0.1);
+
+    try expect(ctx.focused_id != null);
+    if (ctx.focused_id) |fid| {
+        try expect(fid.id == id2.id); // 100 -> 200
+    }
 }

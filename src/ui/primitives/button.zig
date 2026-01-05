@@ -29,6 +29,9 @@ pub fn render(ctx: *UIContext, config: PrimitiveButtonConfig, child_content: any
     var clicked = false;
 
     if (!config.is_disabled) {
+        // Register for keyboard navigation
+        ctx.registerFocusable(id);
+
         if (is_hovered) {
             ctx.input.setMouseCursor(.pointing_hand);
         }
