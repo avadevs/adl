@@ -91,10 +91,22 @@ pub fn begin(id_str: []const u8, count: usize, options: Options) !ListWalker {
     const id_hash = std.hash.Wyhash.hash(0, id_str);
     const id = cl.ElementId.ID(id_str);
 
+    // Register Focus
+    ctx.registerFocusable(id);
+
     // State
     const state_ptr = try ctx.getWidgetState(id_hash, .{ .scroll_list = .{} });
     const state = &state_ptr.scroll_list;
     const theme = t.merge(ctx.theme.*, options.theme_overrides);
+
+    // Check Focus
+    const is_focused = ctx.focused_id != null and ctx.focused_id.?.id == id.id;
+    const border_color = if (is_focused) theme.color_primary else theme.color_base_200; // Use base_200 if not focused, to hide or match bg
+
+    // Auto-select first item if focused and nothing selected
+    if (is_focused and state.selected_index == null and count > 0) {
+        state.selected_index = 0;
+    }
 
     // Layout
     const sc_options = useScrollContainer.Options{
@@ -112,7 +124,11 @@ pub fn begin(id_str: []const u8, count: usize, options: Options) !ListWalker {
     }
 
     // Outer Container
-    element.open(.{ .layout = .{ .direction = .left_to_right, .sizing = .grow, .child_gap = 4 } }); // Wrapper
+    element.open(.{
+        .layout = .{ .direction = .left_to_right, .sizing = .grow, .child_gap = 4 },
+        .border = .{ .width = .all(if (is_focused) 2 else 0), .color = border_color },
+        .corner_radius = .all(theme.radius_box),
+    }); // Wrapper
 
     element.open(.{ // Clip
         .id = id,

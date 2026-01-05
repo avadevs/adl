@@ -242,9 +242,21 @@ pub fn begin(id_str: []const u8, count: usize, columns: []const Column, options:
     const id = cl.ElementId.ID(id_str);
     const theme = t.merge(ctx.theme.*, options.theme_overrides);
 
+    // Register Focus
+    ctx.registerFocusable(id);
+
     // State
     const state_ptr = try ctx.getWidgetState(id_hash, .{ .scroll_table = .{} });
     const state = &state_ptr.scroll_table;
+
+    // Check Focus
+    const is_focused = ctx.focused_id != null and ctx.focused_id.?.id == id.id;
+    const border_color = if (is_focused) theme.color_primary else theme.color_base_200;
+
+    // Auto-select first item if focused and nothing selected
+    if (is_focused and state.selected_index == null and count > 0) {
+        state.selected_index = 0;
+    }
 
     // Calc Width
     var total_content_width: f32 = 0;
@@ -270,6 +282,8 @@ pub fn begin(id_str: []const u8, count: usize, columns: []const Column, options:
     element.open(.{
         .id = id,
         .layout = .{ .direction = .left_to_right, .sizing = .grow, .child_gap = 4 },
+        .border = .{ .width = .all(if (is_focused) 2 else 0), .color = border_color },
+        .corner_radius = .all(theme.radius_box),
     });
 
     // Content Column (TB)
