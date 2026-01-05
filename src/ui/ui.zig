@@ -29,7 +29,7 @@ pub const useScrollContainer = @import("hooks/useScrollContainer.zig");
 
 // Internal imports
 const button_mod = @import("components/button.zig");
-const textbox_mod = @import("elements/textbox.zig");
+const textbox_mod = @import("components/textbox.zig");
 const scrollbar_mod = @import("elements/scrollbar.zig");
 
 const scroll_list_mod = @import("containers/scroll_list.zig");
