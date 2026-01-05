@@ -122,7 +122,7 @@ pub fn render(id_str: []const u8, text: *std.ArrayList(u8), options: Options) !v
                 const char = @as(u8, @intCast(char_code));
                 // Insert char
                 if (state.cursor_pos <= text.items.len) {
-                    text.insert(ctx.frame_allocator, state.cursor_pos, char) catch {};
+                    text.insert(ctx.allocator, state.cursor_pos, char) catch {};
                     state.cursor_pos += 1;
                 }
             }
