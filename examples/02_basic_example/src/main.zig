@@ -81,7 +81,7 @@ const HomeScreen = struct {
         self.text_buffer.deinit(self.allocator);
     }
 
-    pub fn render(self: *HomeScreen) void {
+    pub fn render(self: *HomeScreen) !void {
         const ui = adl.ui;
 
         // Access state safely
@@ -95,12 +95,12 @@ const HomeScreen = struct {
             cl.text(std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Last Job Result: {}", .{state.last_job_result}) catch "Result: ?", .{ .font_size = 24, .color = .{ 150, 150, 150, 255 } });
 
             // Example: Textbox
-            ui.textbox("my_input", &self.text_buffer, .{
+            try ui.textbox("my_input", &self.text_buffer, .{
                 .placeholder = "Enter number to add...",
             });
 
             // Example: Scroll Area
-            ui.scrollArea("scroll_area", .{ .content_height = 200 }, struct {
+            try ui.scrollArea("scroll_area", .{ .content_height = 200 }, struct {
                 fn render() void {
                     cl.text("I am inside a scroll area!", .{ .font_size = 20, .color = .{ 255, 255, 255, 255 } });
                     cl.text("Me too!", .{ .font_size = 20, .color = .{ 200, 200, 200, 255 } });
@@ -114,7 +114,7 @@ const HomeScreen = struct {
             }.render);
 
             // Render buttons normally
-            if (ui.button("btn_inc", .{ .text = "Increment Counter", .variant = .primary })) {
+            if (try ui.button("btn_inc", .{ .text = "Increment Counter", .variant = .primary })) {
                 {
                     const guard = g_ctx.store.write();
                     defer guard.release();
@@ -123,7 +123,7 @@ const HomeScreen = struct {
                 std.log.info("Button clicked! Counter: {}", .{state.counter});
             }
 
-            if (ui.button("btn_job", .{ .text = if (state.loading) "Processing..." else "Run Background Job", .is_disabled = state.loading, .variant = .accent })) {
+            if (try ui.button("btn_job", .{ .text = if (state.loading) "Processing..." else "Run Background Job", .is_disabled = state.loading, .variant = .accent })) {
                 // Parse input
                 const input_val = std.fmt.parseInt(u32, self.text_buffer.items, 10) catch 0;
 
@@ -235,7 +235,9 @@ pub fn main() !void {
         // --- Clay Layout Phase ---
         cl.beginLayout();
         cl.UI()(.{ .id = cl.ElementId.ID("Root"), .layout = .{ .sizing = .grow, .direction = .top_to_bottom }, .background_color = .{ 30, 30, 30, 255 } })({
-            router.render(&ui_ctx);
+            router.render(&ui_ctx) catch |err| {
+                std.log.err("Render error: {}", .{err});
+            };
         });
         const commands = cl.endLayout();
         // -------------------------

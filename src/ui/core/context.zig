@@ -8,6 +8,11 @@ const types = @import("./types.zig");
 /// This allows "implicit context" usage in the API.
 threadlocal var current_instance: ?*UIContext = null;
 
+pub const ContextError = error{
+    NoActiveContext,
+    OutOfMemory,
+};
+
 /// UIContext holds the global state for the entire UI for a single frame.
 /// A pointer to this struct is passed to every UI component. It is the "single
 /// source of truth" for global state like input, focus, and styling.
@@ -103,10 +108,10 @@ pub const UIContext = struct {
     }
 
     /// Retrieves the active UIContext for the current thread.
-    /// Panics if no context is active (safety check).
-    pub fn getCurrent() *UIContext {
+    /// Returns error if no context is active (safety check).
+    pub fn getCurrent() ContextError!*UIContext {
         if (current_instance) |ctx| return ctx;
-        @panic("No UIContext is active on this thread! Did you forget to call ui_ctx.makeCurrent()?");
+        return ContextError.NoActiveContext;
     }
 
     /// Helper to free any allocated memory within a WidgetState
@@ -153,19 +158,19 @@ pub const UIContext = struct {
 
     /// Retrieves or initializes a standard widget state (Textbox, Scroll, etc).
     /// Uses the current active scope.
-    pub fn getWidgetState(self: *UIContext, id: u64, default_state: types.WidgetState) *types.WidgetState {
+    pub fn getWidgetState(self: *UIContext, id: u64, default_state: types.WidgetState) ContextError!*types.WidgetState {
         const current_scope = if (self.scope_stack.items.len > 0)
             self.scope_stack.getLast()
         else
             0; // Default/Global scope
 
-        const scope_map_result = self.scopes.getOrPut(current_scope) catch @panic("OOM in getWidgetState (scope)");
+        const scope_map_result = self.scopes.getOrPut(current_scope) catch return ContextError.OutOfMemory;
         if (!scope_map_result.found_existing) {
             scope_map_result.value_ptr.* = std.AutoHashMap(u64, types.WidgetState).init(self.allocator);
         }
 
         const state_map = scope_map_result.value_ptr;
-        const state_result = state_map.getOrPut(id) catch @panic("OOM in getWidgetState (state)");
+        const state_result = state_map.getOrPut(id) catch return ContextError.OutOfMemory;
 
         if (!state_result.found_existing) {
             state_result.value_ptr.* = default_state;
@@ -176,19 +181,19 @@ pub const UIContext = struct {
 
     /// Retrieves or initializes a generic custom widget state.
     /// Used for third-party extensions.
-    pub fn getOrInitCustom(self: *UIContext, id: u64, comptime T: type) *T {
+    pub fn getOrInitCustom(self: *UIContext, id: u64, comptime T: type) ContextError!*T {
         const current_scope = if (self.scope_stack.items.len > 0)
             self.scope_stack.getLast()
         else
             0;
 
-        const scope_map_result = self.scopes.getOrPut(current_scope) catch @panic("OOM in getOrInitCustom (scope)");
+        const scope_map_result = self.scopes.getOrPut(current_scope) catch return ContextError.OutOfMemory;
         if (!scope_map_result.found_existing) {
             scope_map_result.value_ptr.* = std.AutoHashMap(u64, types.WidgetState).init(self.allocator);
         }
 
         const state_map = scope_map_result.value_ptr;
-        const entry = state_map.getOrPut(id) catch @panic("OOM in getOrInitCustom (state)");
+        const entry = state_map.getOrPut(id) catch return ContextError.OutOfMemory;
 
         // Verification & Initialization
         if (entry.found_existing) {
@@ -204,7 +209,7 @@ pub const UIContext = struct {
         }
 
         // Initialize new
-        const ptr = self.allocator.create(T) catch @panic("OOM allocating custom state");
+        const ptr = self.allocator.create(T) catch return ContextError.OutOfMemory;
         ptr.* = T{}; // Default init
 
         // Generate cleanup function
@@ -331,11 +336,11 @@ test "UIContext Scoped State" {
 
     // 2. Init State
     const id = 10;
-    const state = ctx.getWidgetState(id, .{ .textbox = .{} });
+    const state = try ctx.getWidgetState(id, .{ .textbox = .{} });
     state.textbox.cursor_pos = 99;
 
     // 3. Verify State Persists
-    const state_2 = ctx.getWidgetState(id, .{ .textbox = .{} });
+    const state_2 = try ctx.getWidgetState(id, .{ .textbox = .{} });
     try std.testing.expectEqual(@as(usize, 99), state_2.textbox.cursor_pos);
 
     // 4. End Scope
@@ -347,6 +352,6 @@ test "UIContext Scoped State" {
     // 6. Verify Cleanup
     // Re-enter scope, state should be reset (new default)
     try ctx.beginScope(12345);
-    const state_3 = ctx.getWidgetState(id, .{ .textbox = .{} });
+    const state_3 = try ctx.getWidgetState(id, .{ .textbox = .{} });
     try std.testing.expectEqual(@as(usize, 0), state_3.textbox.cursor_pos);
 }

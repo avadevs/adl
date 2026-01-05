@@ -51,8 +51,8 @@ pub const TableColumn = scroll_table_mod.Column;
 /// Functions here automatically use the active UIContext.
 pub const UI = struct {
     /// Renders a button.
-    pub fn button(id_str: []const u8, options: button_mod.Options) bool {
-        const ctx = context.UIContext.getCurrent();
+    pub fn button(id_str: []const u8, options: button_mod.Options) !bool {
+        const ctx = try context.UIContext.getCurrent();
         // Assume ID is stable for button functionality (interaction)
         const id = cl.ElementId.ID(id_str);
         return button_mod.render(ctx, id, options);
@@ -60,25 +60,25 @@ pub const UI = struct {
 
     /// Renders a textbox.
     /// State is managed automatically.
-    pub fn textbox(id_str: []const u8, text: *std.ArrayList(u8), options: textbox_mod.Options) void {
-        textbox_mod.render(id_str, text, options);
+    pub fn textbox(id_str: []const u8, text: *std.ArrayList(u8), options: textbox_mod.Options) !void {
+        try textbox_mod.render(id_str, text, options);
     }
 
     /// Renders a generic scrollable area.
-    pub fn scrollArea(id_str: []const u8, options: scroll_area_mod.Options, content_fn: anytype) void {
-        scroll_area_mod.render(id_str, options, content_fn);
+    pub fn scrollArea(id_str: []const u8, options: scroll_area_mod.Options, content_fn: anytype) !void {
+        try scroll_area_mod.render(id_str, options, content_fn);
     }
 
     /// Begins a scroll list. Returns a ListWalker.
     /// Usage:
-    /// const list = ui.beginList("id", items.len, .{});
+    /// const list = try ui.beginList("id", items.len, .{});
     /// var iter = list.iterator();
     /// while (iter.next()) |i| {
     ///     if (list.row(i)) { ... }
     ///     ui.text(items[i]);
     /// }
     /// ui.endList(list);
-    pub fn beginList(id_str: []const u8, count: usize, options: scroll_list_mod.Options) scroll_list_mod.ListWalker {
+    pub fn beginList(id_str: []const u8, count: usize, options: scroll_list_mod.Options) !scroll_list_mod.ListWalker {
         return scroll_list_mod.begin(id_str, count, options);
     }
 
@@ -88,7 +88,7 @@ pub const UI = struct {
 
     /// Begins a scroll table. Returns a TableWalker.
     /// Usage:
-    /// const table = ui.beginTable("id", items.len, columns, .{});
+    /// const table = try ui.beginTable("id", items.len, columns, .{});
     /// table.header();
     /// var iter = table.iterator();
     /// while (iter.next()) |i| {
@@ -97,7 +97,7 @@ pub const UI = struct {
     ///     table.textCell(items[i].age);
     /// }
     /// ui.endTable(table);
-    pub fn beginTable(id_str: []const u8, count: usize, columns: []const TableColumn, options: scroll_table_mod.Options) scroll_table_mod.TableWalker {
+    pub fn beginTable(id_str: []const u8, count: usize, columns: []const TableColumn, options: scroll_table_mod.Options) !scroll_table_mod.TableWalker {
         return scroll_table_mod.begin(id_str, count, columns, options);
     }
 
@@ -106,7 +106,7 @@ pub const UI = struct {
     }
 
     // Helper to get context if needed manually
-    pub fn getContext() *context.UIContext {
+    pub fn getContext() !*context.UIContext {
         return context.UIContext.getCurrent();
     }
 };

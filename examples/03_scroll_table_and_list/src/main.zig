@@ -73,7 +73,7 @@ const HomeScreen = struct {
         _ = self;
     }
 
-    pub fn render(self: *HomeScreen) void {
+    pub fn render(self: *HomeScreen) !void {
         const state_guard = g_ctx.store.read();
         defer state_guard.release();
         const items = state_guard.state.items.items;
@@ -86,7 +86,7 @@ const HomeScreen = struct {
                 cl.UI()(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .{ .w = .fixed(250), .h = .grow }, .child_gap = 10 } })({
                     cl.text("Simple List", .{ .font_size = 24, .color = .{ 180, 180, 180, 255 } });
 
-                    var walker = ui.scrollList.begin("my_list", items.len, .{ .item_height = 30 });
+                    var walker = try ui.scrollList.begin("my_list", items.len, .{ .item_height = 30 });
                     defer ui.scrollList.end(walker);
 
                     var iter = walker.iterator();
@@ -110,7 +110,7 @@ const HomeScreen = struct {
                         .{ .name = "Category", .width = 120 },
                     };
 
-                    var walker = ui.scrollTable.begin("my_table", items.len, columns, .{ .row_height = 30 });
+                    var walker = try ui.scrollTable.begin("my_table", items.len, columns, .{ .row_height = 30 });
                     defer ui.scrollTable.end(walker);
 
                     walker.header();
@@ -252,7 +252,9 @@ pub fn main() !void {
         cl.beginLayout();
         std.log.debug("Begin Layout", .{});
         cl.UI()(.{ .id = cl.ElementId.ID("Root"), .layout = .{ .sizing = .grow, .direction = .top_to_bottom }, .background_color = .{ 30, 30, 30, 255 } })({
-            router.render(&ui_ctx);
+            router.render(&ui_ctx) catch |err| {
+                std.log.err("Render error: {}", .{err});
+            };
         });
         std.log.debug("End Layout Start", .{});
         const commands = cl.endLayout();

@@ -236,14 +236,14 @@ pub const TableIterator = struct {
     }
 };
 
-pub fn begin(id_str: []const u8, count: usize, columns: []const Column, options: Options) TableWalker {
-    const ctx = UIContext.getCurrent();
+pub fn begin(id_str: []const u8, count: usize, columns: []const Column, options: Options) !TableWalker {
+    const ctx = try UIContext.getCurrent();
     const id_hash = std.hash.Wyhash.hash(0, id_str);
     const id = cl.ElementId.ID(id_str);
     const theme = t.merge(ctx.theme.*, options.theme_overrides);
 
     // State
-    const state_ptr = ctx.getWidgetState(id_hash, .{ .scroll_table = .{} });
+    const state_ptr = try ctx.getWidgetState(id_hash, .{ .scroll_table = .{} });
     const state = &state_ptr.scroll_table;
 
     // Calc Width

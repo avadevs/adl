@@ -41,7 +41,7 @@ fn onHoverCallback(id: cl.ElementId, pointerInfo: cl.PointerData, internal_ptr: 
     const text = internal_ptr.text;
 
     // Retrieve state safely (re-lookup to handle potential pointer invalidation)
-    const state_ptr = ctx.getWidgetState(internal_ptr.id_hash, .{ .textbox = .{} });
+    const state_ptr = ctx.getWidgetState(internal_ptr.id_hash, .{ .textbox = .{} }) catch return;
     const state = &state_ptr.textbox;
 
     // Change the mouse cursor to the I-beam to indicate text input.
@@ -86,12 +86,12 @@ fn onHoverCallback(id: cl.ElementId, pointerInfo: cl.PointerData, internal_ptr: 
 ///     .placeholder = "Enter text...",
 /// });
 /// ```
-pub fn render(id_str: []const u8, text: *std.ArrayList(u8), options: Options) void {
-    const ctx = UIContext.getCurrent();
+pub fn render(id_str: []const u8, text: *std.ArrayList(u8), options: Options) !void {
+    const ctx = try UIContext.getCurrent();
     const id_hash = std.hash.Wyhash.hash(0, id_str);
 
     // Retrieve/Init State
-    const state_ptr = ctx.getWidgetState(id_hash, .{ .textbox = .{} });
+    const state_ptr = try ctx.getWidgetState(id_hash, .{ .textbox = .{} });
     const state = &state_ptr.textbox;
 
     // Determine theme

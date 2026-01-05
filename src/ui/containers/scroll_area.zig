@@ -19,12 +19,12 @@ pub const Options = struct {
 ///
 /// `content_fn` is a function that renders the content inside the scroll area.
 /// It must be of type `fn() void`.
-pub fn render(id_str: []const u8, options: Options, content_fn: anytype) void {
-    const ctx = UIContext.getCurrent();
+pub fn render(id_str: []const u8, options: Options, content_fn: anytype) !void {
+    const ctx = try UIContext.getCurrent();
     const id_hash = std.hash.Wyhash.hash(0, id_str);
 
     // Retrieve/Init State
-    const state_ptr = ctx.getWidgetState(id_hash, .{ .scroll_area = .{} });
+    const state_ptr = try ctx.getWidgetState(id_hash, .{ .scroll_area = .{} });
     const state = &state_ptr.scroll_area;
 
     const theme = t.merge(ctx.theme.*, options.theme_overrides);

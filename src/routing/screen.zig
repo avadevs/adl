@@ -10,7 +10,7 @@ pub const AnyScreen = struct {
 
     pub const VTable = struct {
         /// Called to render the screen. Should be lightweight.
-        render: *const fn (ptr: *anyopaque, ctx: *UIContext) void,
+        render: *const fn (ptr: *anyopaque, ctx: *UIContext) anyerror!void,
 
         /// Called to update an existing screen with new arguments.
         /// Returns true if the update was handled, false if the router should recreate the screen.
@@ -20,8 +20,8 @@ pub const AnyScreen = struct {
         deinit: *const fn (ptr: *anyopaque, ctx: *UIContext) void,
     };
 
-    pub fn render(self: AnyScreen, ctx: *UIContext) void {
-        self.vtable.render(self.ptr, ctx);
+    pub fn render(self: AnyScreen, ctx: *UIContext) !void {
+        try self.vtable.render(self.ptr, ctx);
     }
 
     pub fn update(self: AnyScreen, args: ?RouteArgs) !bool {
@@ -46,7 +46,7 @@ pub const ScreenFactory = struct {
     /// - `pub fn init(allocator: std.mem.Allocator, args: RouteArgs) !T`
     ///   **Note:** The `args` map and its content are temporary and valid only during the `init` call.
     ///   If you need to persist any string values, you MUST copy/duplicate them using the allocator.
-    /// - `pub fn render(self: *T) void`
+    /// - `pub fn render(self: *T) !void`
     /// - `pub fn deinit(self: *T) void`
     ///
     /// Optional:
@@ -72,13 +72,13 @@ pub const ScreenFactory = struct {
                 .deinit = deinitImpl,
             };
 
-            fn renderImpl(ptr: *anyopaque, ctx: *UIContext) void {
+            fn renderImpl(ptr: *anyopaque, ctx: *UIContext) !void {
                 const self: *T = @ptrCast(@alignCast(ptr));
                 // Automatically manage scope for this screen instance
-                ctx.beginScope(@intFromPtr(self)) catch {};
+                try ctx.beginScope(@intFromPtr(self));
                 defer ctx.endScope();
 
-                self.render();
+                try self.render();
             }
 
             fn updateImpl(ptr: *anyopaque, args: ?RouteArgs) !bool {

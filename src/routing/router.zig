@@ -81,7 +81,7 @@ pub const Router = struct {
     /// `ScreenType` gets converted to `AnyScreen` internally. The type must implement:
     /// - `pub fn init(allocator: std.mem.Allocator, args: ?route.RouteArgs) !Self`
     /// - `pub fn deinit(self: *Self) void`
-    /// - `pub fn render(self: *Self) void`
+    /// - `pub fn render(self: *Self) !void`
     ///
     /// Optional:
     /// - `pub fn update(self: *Self, args: ?route.RouteArgs) !void` (used for keep-alive routes)
@@ -253,7 +253,7 @@ pub const Router = struct {
         return true;
     }
 
-    pub fn render(self: *Router, ctx: *UIContext) void {
+    pub fn render(self: *Router, ctx: *UIContext) !void {
         if (self.history.items.len == 0) return;
 
         // Ensure the context is marked as current for the render pass
@@ -261,7 +261,7 @@ pub const Router = struct {
 
         const entry = &self.history.items[self.history_index];
         if (entry.screen) |s| {
-            s.render(ctx);
+            try s.render(ctx);
         }
 
         log.debug("Rendered screen for URL: '{s}'", .{entry.url});

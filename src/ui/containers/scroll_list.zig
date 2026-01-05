@@ -86,13 +86,13 @@ pub const ListIterator = struct {
     }
 };
 
-pub fn begin(id_str: []const u8, count: usize, options: Options) ListWalker {
-    const ctx = UIContext.getCurrent();
+pub fn begin(id_str: []const u8, count: usize, options: Options) !ListWalker {
+    const ctx = try UIContext.getCurrent();
     const id_hash = std.hash.Wyhash.hash(0, id_str);
     const id = cl.ElementId.ID(id_str);
 
     // State
-    const state_ptr = ctx.getWidgetState(id_hash, .{ .scroll_list = .{} });
+    const state_ptr = try ctx.getWidgetState(id_hash, .{ .scroll_list = .{} });
     const state = &state_ptr.scroll_list;
     const theme = t.merge(ctx.theme.*, options.theme_overrides);
 
