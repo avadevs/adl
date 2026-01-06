@@ -65,6 +65,9 @@ pub const UIContext = struct {
     /// the blinking cursor in a textbox.
     anim_timer: f32 = 0,
 
+    /// Time elapsed since the last frame in seconds.
+    delta_time: f32 = 0,
+
     /// Double-buffered lists for tracking focusable elements in order.
     /// 'prev' contains the IDs from the last frame (used for navigation logic).
     /// 'curr' gathers IDs during the current frame's render pass.
@@ -256,6 +259,7 @@ pub const UIContext = struct {
 
     /// Call this at the beginning of each frame's UI rendering pass.
     pub fn beginFrame(self: *UIContext, delta_time: f32) void {
+        self.delta_time = delta_time;
         self.input.update(delta_time) catch {}; // Update input state
 
         // --- Focus Navigation Logic ---

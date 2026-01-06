@@ -169,6 +169,10 @@ pub const SortDirection = enum {
     }
 };
 
+pub const ToggleState = struct {
+    animation_value: f32 = 0.0,
+};
+
 /// Interaction state for a scroll list.
 pub const ScrollListState = struct {
     scroll: ScrollState = .{},
@@ -199,6 +203,7 @@ pub const CustomStateWrapper = struct {
 /// A union of all possible widget states.
 pub const WidgetState = union(enum) {
     textbox: TextboxState,
+    toggle: ToggleState,
     scroll_area: ScrollState,
     scroll_list: ScrollListState,
     scroll_table: ScrollTableState,

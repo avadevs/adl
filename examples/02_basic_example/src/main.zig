@@ -23,6 +23,8 @@ const AppState = struct {
     counter: u32 = 0,
     last_job_result: u32 = 0,
     loading: bool = false,
+    show_details: bool = true,
+    enable_feature_x: bool = false,
 };
 
 // Global context to allow screens to access systems.
@@ -93,6 +95,24 @@ const HomeScreen = struct {
             cl.text(std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Counter: {}", .{state.counter}) catch "Counter: ?", .{ .font_size = 24, .color = .{ 150, 150, 150, 255 } });
 
             cl.text(std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Last Job Result: {}", .{state.last_job_result}) catch "Result: ?", .{ .font_size = 24, .color = .{ 150, 150, 150, 255 } });
+
+            // Example: Checkbox
+            if (try ui.checkbox("cb_details", .{ .checked = state.show_details, .label = "Show Details" })) {
+                const guard = g_ctx.store.write();
+                defer guard.release();
+                guard.state.show_details = !guard.state.show_details;
+            }
+
+            // Example: Toggle Switch
+            if (try ui.toggle("sw_feature", .{ .checked = state.enable_feature_x, .label = "Enable Feature X", .variant = .accent })) {
+                const guard = g_ctx.store.write();
+                defer guard.release();
+                guard.state.enable_feature_x = !guard.state.enable_feature_x;
+            }
+
+            if (state.show_details) {
+                cl.text("Here are the details...", .{ .font_size = 18, .color = .{ 100, 200, 100, 255 } });
+            }
 
             // Example: Textbox
             try ui.textbox("my_input", &self.text_buffer, .{

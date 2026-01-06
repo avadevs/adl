@@ -29,6 +29,8 @@ pub const useScrollContainer = @import("hooks/useScrollContainer.zig");
 
 // Internal imports
 const button_mod = @import("components/button.zig");
+const checkbox_mod = @import("components/checkbox.zig");
+const toggle_mod = @import("components/toggle.zig");
 const textbox_mod = @import("components/textbox.zig");
 const scrollbar_mod = @import("elements/scrollbar.zig");
 
@@ -38,6 +40,8 @@ const scroll_area_mod = @import("components/scroll_area.zig");
 
 // Public exports
 pub const button_elem = button_mod;
+pub const checkbox_elem = checkbox_mod;
+pub const toggle_elem = toggle_mod;
 pub const textbox_elem = textbox_mod;
 pub const scrollbar_elem = scrollbar_mod;
 pub const scrollList = scroll_list_mod;
@@ -56,6 +60,20 @@ pub const UI = struct {
         // Assume ID is stable for button functionality (interaction)
         const id = cl.ElementId.ID(id_str);
         return button_mod.render(ctx, id, options);
+    }
+
+    /// Renders a checkbox.
+    pub fn checkbox(id_str: []const u8, options: checkbox_mod.Options) !bool {
+        const ctx = try context.UIContext.getCurrent();
+        const id = cl.ElementId.ID(id_str);
+        return checkbox_mod.render(ctx, id, options);
+    }
+
+    /// Renders a toggle switch.
+    pub fn toggle(id_str: []const u8, options: toggle_elem.Options) !bool {
+        const ctx = try context.UIContext.getCurrent();
+        const id = cl.ElementId.ID(id_str);
+        return toggle_elem.render(ctx, id, options);
     }
 
     /// Renders a textbox.
@@ -113,6 +131,8 @@ pub const UI = struct {
 
 // Top-level aliases for convenience
 pub const button = UI.button;
+pub const checkbox = UI.checkbox;
+pub const toggle = UI.toggle;
 pub const textbox = UI.textbox;
 pub const scrollArea = UI.scrollArea;
 pub const beginList = UI.beginList;
