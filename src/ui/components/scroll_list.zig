@@ -3,7 +3,7 @@ const cl = @import("zclay");
 const UIContext = @import("../core/context.zig").UIContext;
 const element = @import("../core/element.zig");
 const useScrollContainer = @import("../hooks/useScrollContainer.zig");
-const scrollbar = @import("../elements/scrollbar.zig");
+const PrimitiveScrollView = @import("../primitives/scroll_view.zig");
 const types = @import("../core/types.zig");
 const t = @import("../core/theme.zig");
 
@@ -20,6 +20,7 @@ pub const ListWalker = struct {
     ctx: *UIContext,
     state: *types.ScrollListState,
     layout: useScrollContainer.ScrollLayout,
+    sv_state: PrimitiveScrollView.State,
     options: Options,
     total_count: usize,
     id: cl.ElementId,
@@ -108,12 +109,26 @@ pub fn begin(id_str: []const u8, count: usize, options: Options) !ListWalker {
         state.selected_index = 0;
     }
 
+    // --- VIEWPORT OVERRIDE CALCULATION ---
+    // Wrapper (H) = Border(2) + Gap(4) + Body + Border(2)
+    // Overhead = 2 + 4 + 2 = 8px
+    const border_w: f32 = if (is_focused) 2 else 0;
+    const reserved_height = (border_w * 2) + 4;
+
+    const main_box = cl.getElementData(id).bounding_box;
+    var viewport_override: ?cl.Dimensions = null;
+
+    if (main_box.width > 0 and main_box.height > reserved_height) {
+        viewport_override = .{ .w = main_box.width - (border_w * 2) - 4, .h = main_box.height - reserved_height };
+    }
+
     // Layout
     const sc_options = useScrollContainer.Options{
         .total_content_dims = .{ .h = @as(f32, @floatFromInt(count)) * options.item_height, .w = 0 },
         .item_height = options.item_height,
         .enable_horizontal_scroll = false,
         .scrollbar_width = options.scrollbar_width,
+        .viewport_size_override = viewport_override,
     };
 
     const layout = useScrollContainer.useScrollContainer(ctx, id, &state.scroll, sc_options);
@@ -123,19 +138,16 @@ pub fn begin(id_str: []const u8, count: usize, options: Options) !ListWalker {
         handleKeyboardInput(ctx, state, count, options.item_height, layout.viewport_dims.h);
     }
 
-    // Outer Container
-    element.open(.{
-        .layout = .{ .direction = .left_to_right, .sizing = .grow, .child_gap = 4 },
+    // Start Primitive ScrollView (replaces Outer Wrapper + Clip)
+    const sv_state = PrimitiveScrollView.begin(ctx, .{
+        .id = id,
+        .layout = layout,
         .border = .{ .width = .all(if (is_focused) 2 else 0), .color = border_color },
         .corner_radius = .all(theme.radius_box),
-    }); // Wrapper
-
-    element.open(.{ // Clip
-        .id = id,
-        .layout = .{ .sizing = .grow },
-        .clip = .{ .vertical = true, .child_offset = layout.child_offset },
+        .scrollbar_width = options.scrollbar_width,
     });
 
+    // Content Container (Fixed Height for Virtualization)
     element.open(.{ // Content
         .layout = .{ .direction = .top_to_bottom, .sizing = .{ .w = .grow, .h = .fixed(sc_options.total_content_dims.h) } },
     });
@@ -149,6 +161,7 @@ pub fn begin(id_str: []const u8, count: usize, options: Options) !ListWalker {
         .ctx = ctx,
         .state = state,
         .layout = layout,
+        .sv_state = sv_state,
         .options = options,
         .total_count = count,
         .id = id,
@@ -162,15 +175,10 @@ pub fn end(walker: ListWalker) void {
         cl.UI()(.{ .layout = .{ .sizing = .{ .h = .fixed(walker.layout.bottom_spacer_height) } } })({});
     }
 
-    element.close(); // Close Content
-    element.close(); // Close Clip
+    element.close(); // Close Content Container
 
-    // Scrollbar
-    if (walker.layout.v_scrollbar.is_needed) {
-        scrollbar.vertical(walker.ctx, walker.options.scrollbar_width, walker.layout.v_scrollbar);
-    }
-
-    element.close(); // Close Wrapper
+    // End Primitive ScrollView (Closes Clip, renders Scrollbars, closes Wrapper)
+    PrimitiveScrollView.end(walker.sv_state);
 }
 
 // Logic helper

@@ -32,9 +32,9 @@ const button_mod = @import("components/button.zig");
 const textbox_mod = @import("components/textbox.zig");
 const scrollbar_mod = @import("elements/scrollbar.zig");
 
-const scroll_list_mod = @import("containers/scroll_list.zig");
-const scroll_table_mod = @import("containers/scroll_table.zig");
-const scroll_area_mod = @import("containers/scroll_area.zig");
+const scroll_list_mod = @import("components/scroll_list.zig");
+const scroll_table_mod = @import("components/scroll_table.zig");
+const scroll_area_mod = @import("components/scroll_area.zig");
 
 // Public exports
 pub const button_elem = button_mod;
@@ -65,8 +65,8 @@ pub const UI = struct {
     }
 
     /// Renders a generic scrollable area.
-    pub fn scrollArea(id_str: []const u8, options: scroll_area_mod.Options, content_fn: anytype) !void {
-        try scroll_area_mod.render(id_str, options, content_fn);
+    pub fn scrollArea(id_str: []const u8, options: scroll_area_mod.Options) !scroll_area_mod.ScrollArea {
+        return scroll_area_mod.begin(id_str, options);
     }
 
     /// Begins a scroll list. Returns a ListWalker.

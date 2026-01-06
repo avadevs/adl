@@ -4,7 +4,7 @@ const cl = @import("zclay");
 const UIContext = @import("../core/context.zig").UIContext;
 const element = @import("../core/element.zig");
 const useScrollContainer = @import("../hooks/useScrollContainer.zig");
-const scrollbar = @import("../elements/scrollbar.zig");
+const PrimitiveScrollView = @import("../primitives/scroll_view.zig");
 const types = @import("../core/types.zig");
 const t = @import("../core/theme.zig");
 
@@ -31,7 +31,7 @@ pub const TableWalker = struct {
     options: Options,
     total_count: usize,
     columns: []const Column,
-    total_content_width: f32, // Added field
+    total_content_width: f32,
     id: cl.ElementId,
     theme: t.THEME,
 
@@ -41,16 +41,21 @@ pub const TableWalker = struct {
     /// Returns an iterator over the visible row indices.
     /// Also opens the Body container hierarchy.
     pub fn iterator(self: *const TableWalker) TableIterator {
-        // --- Open Body Containers ---
-        element.open(.{ // Body Clip
-            .id = cl.ElementId.localID("TableBody"),
-            .layout = .{ .sizing = .grow },
-            .clip = .{ .vertical = true, .horizontal = true, .child_offset = self.layout.child_offset },
+        // --- Open Body Containers using PrimitiveScrollView ---
+        // This replaces the manual Body Clip opening.
+        // The PrimitiveScrollView handles the V-Scrollbar (next to body) and H-Scrollbar (below body).
+        const sv_state = PrimitiveScrollView.begin(self.ctx, .{
+            .id = cl.ElementId.localIDI("body", self.id.id), // Use BODY ID
+            .layout = self.layout,
+            .background_color = .{ 0, 0, 0, 0 },
+            .scrollbar_width = self.options.scrollbar_width,
+            .scrollbar_height = self.options.scrollbar_height,
         });
 
         const total_h = @as(f32, @floatFromInt(self.total_count)) * self.options.row_height;
 
-        element.open(.{ // Body Content
+        // Inner Content for Virtualization
+        element.open(.{
             .layout = .{ .direction = .top_to_bottom, .sizing = .{ .w = .fixed(self.total_content_width), .h = .fixed(total_h) } },
         });
 
@@ -64,6 +69,7 @@ pub const TableWalker = struct {
             .end = self.layout.last_visible_item,
             .total = self.total_count,
             .bottom_spacer_height = self.layout.bottom_spacer_height,
+            .sv_state = sv_state,
         };
     }
 
@@ -218,6 +224,7 @@ pub const TableIterator = struct {
     end: usize,
     total: usize,
     bottom_spacer_height: f32,
+    sv_state: PrimitiveScrollView.State,
 
     pub fn next(self: *TableIterator) ?usize {
         if (self.current >= self.end or self.current >= self.total) return null;
@@ -232,7 +239,8 @@ pub const TableIterator = struct {
             cl.UI()(.{ .layout = .{ .sizing = .{ .h = .fixed(self.bottom_spacer_height) } } })({});
         }
         element.close(); // Close Body Content
-        element.close(); // Close Body Clip
+
+        PrimitiveScrollView.end(self.sv_state);
     }
 };
 
@@ -242,10 +250,10 @@ pub fn begin(id_str: []const u8, count: usize, columns: []const Column, options:
     const id = cl.ElementId.ID(id_str);
     const theme = t.merge(ctx.theme.*, options.theme_overrides);
 
-    // Register Focus
+    // Register Focus (Main ID)
     ctx.registerFocusable(id);
 
-    // State
+    // State (Main ID)
     const state_ptr = try ctx.getWidgetState(id_hash, .{ .scroll_table = .{} });
     const state = &state_ptr.scroll_table;
 
@@ -262,6 +270,31 @@ pub fn begin(id_str: []const u8, count: usize, columns: []const Column, options:
     var total_content_width: f32 = 0;
     for (columns) |col| total_content_width += col.width;
 
+    // --- VIEWPORT OVERRIDE CALCULATION ---
+    // Calculate the actual available height for the scroll body.
+    // Wrapper (H) = Border(2) + Content(4) + Header(32) + Gap(4) + Body + Border(2)
+    // Overhead = 2 + 4 + 32 + 4 + 2 = 44px
+    // Note: Border width depends on focus (2 or 0), but we should probably assume worst case or current case.
+    // Let's use current case.
+    const border_w: f32 = if (is_focused) 2 else 0;
+    const reserved_height = (border_w * 2) + 4 + options.header_height + 4;
+
+    const main_box = cl.getElementData(id).bounding_box;
+    var viewport_override: ?cl.Dimensions = null;
+
+    if (main_box.width > 0 and main_box.height > reserved_height) {
+        viewport_override = .{
+            .w = main_box.width - (border_w * 2) - 8, // Width overhead: Border(2*2) + Gap(4) ? No, Gap is child_gap. Wrapper is LR. Gap is 4.
+            // Wrapper LR: Border | Gap | Content | Border.
+            // Actually ScrollTable wrapper is:
+            // .layout = .{ .direction = .left_to_right, .child_gap = 4 }
+            // Content is inside.
+            // So Width = MainW - Borders - Gap?
+            // Wait, ScrollBar is vertical.
+            .h = main_box.height - reserved_height,
+        };
+    }
+
     // Layout
     const sc_options = useScrollContainer.Options{
         .total_content_dims = .{ .h = @as(f32, @floatFromInt(count)) * options.row_height, .w = total_content_width },
@@ -269,8 +302,10 @@ pub fn begin(id_str: []const u8, count: usize, columns: []const Column, options:
         .enable_horizontal_scroll = true,
         .scrollbar_width = options.scrollbar_width,
         .scrollbar_height = options.scrollbar_height,
+        .viewport_size_override = viewport_override,
     };
 
+    // Use ID (Main Wrapper) for scroll container logic (input handling, etc.)
     const layout = useScrollContainer.useScrollContainer(ctx, id, &state.scroll, sc_options);
 
     // Keyboard
@@ -304,19 +339,10 @@ pub fn begin(id_str: []const u8, count: usize, columns: []const Column, options:
     };
 }
 
-pub fn end(walker: TableWalker) void {
-    // H Scrollbar (inside Content Column)
-    if (walker.layout.h_scrollbar.is_needed) {
-        scrollbar.horizontal(walker.ctx, walker.options.scrollbar_height, walker.layout.h_scrollbar);
-    }
+pub fn end(_: TableWalker) void {
+    // Scrollbars are handled by iterator.deinit() which calls PrimitiveScrollView.end()
 
     element.close(); // Close Content Column
-
-    // V Scrollbar (inside Outer Wrapper)
-    if (walker.layout.v_scrollbar.is_needed) {
-        scrollbar.vertical(walker.ctx, walker.options.scrollbar_width, walker.layout.v_scrollbar);
-    }
-
     element.close(); // Close Outer Wrapper
 }
 

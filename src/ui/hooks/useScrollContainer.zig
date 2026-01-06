@@ -17,6 +17,7 @@ pub const Options = struct {
     enable_horizontal_scroll: bool = false,
     scrollbar_width: f32 = 12,
     scrollbar_height: f32 = 12,
+    viewport_size_override: ?cl.Dimensions = null,
 };
 
 /// Holds the persistent scrolling state for the container.
@@ -51,7 +52,23 @@ pub fn useScrollContainer(
     state: *State,
     options: Options,
 ) ScrollLayout {
-    const viewport_box = cl.getElementData(id).bounding_box;
+    const viewport_box = if (options.viewport_size_override) |override|
+        cl.BoundingBox{ .x = 0, .y = 0, .width = override.w, .height = override.h }
+    else
+        cl.getElementData(id).bounding_box;
+
+    if (viewport_box.width <= 0 or viewport_box.height <= 0) {
+        return ScrollLayout{
+            .child_offset = .{ .x = 0, .y = 0 },
+            .first_visible_item = 0,
+            .last_visible_item = if (options.item_height > 0) @as(usize, @intFromFloat(options.total_content_dims.h / options.item_height)) else 0,
+            .top_spacer_height = 0,
+            .bottom_spacer_height = 0,
+            .viewport_dims = .{ .w = 0, .h = 0 },
+            .v_scrollbar = .{ .is_needed = false, .track_id = cl.ElementId.localIDI("v_track", id.id), .thumb_id = cl.ElementId.localIDI("v_thumb", id.id), .thumb_axis = 0, .thumb_size = 0 },
+            .h_scrollbar = .{ .is_needed = false, .track_id = cl.ElementId.localIDI("h_track", id.id), .thumb_id = cl.ElementId.localIDI("h_thumb", id.id), .thumb_axis = 0, .thumb_size = 0 },
+        };
+    }
 
     const v_scroll_needed = options.enable_vertical_scroll and options.total_content_dims.h > viewport_box.height;
     const h_scroll_needed = options.enable_horizontal_scroll and options.total_content_dims.w > viewport_box.width;
@@ -115,12 +132,31 @@ pub fn useScrollContainer(
         }
     }
 
-    // TODO: Horizontal scrollbar interaction
+    // Horizontal scrollbar interaction
+    if (h_scroll_needed) {
+        if (cl.pointerOver(layout.h_scrollbar.thumb_id) and ctx.input.getMouse().left_button.isPressed()) {
+            state.is_dragging_thumb_x = true;
+            state.drag_start_mouse_x = ctx.input.getMouse().pos.x;
+            state.drag_start_scroll_x = state.scroll_offset.x;
+            ctx.active_id = layout.h_scrollbar.thumb_id;
+        } else if (cl.pointerOver(layout.h_scrollbar.track_id) and ctx.input.getMouse().left_button.isPressed()) {
+            if (!state.is_dragging_thumb_x) {
+                const thumb_w = @max(20, viewport_width * (viewport_width / options.total_content_dims.w));
+                const click_x_relative = ctx.input.getMouse().pos.x - cl.getElementData(layout.h_scrollbar.track_id).bounding_box.x;
+                const scroll_ratio = (click_x_relative - (thumb_w / 2)) / (viewport_width - thumb_w);
+                state.scroll_offset.x = scroll_ratio * (options.total_content_dims.w - viewport_width);
+            }
+        }
+    }
 
     if (state.is_dragging_thumb_y) {
         const mouse_delta_y = ctx.input.getMouse().pos.y - state.drag_start_mouse_y;
         const scroll_ratio = if (viewport_height > 0) options.total_content_dims.h / viewport_height else 1.0;
         state.scroll_offset.y = state.drag_start_scroll_y + (mouse_delta_y * scroll_ratio);
+    } else if (state.is_dragging_thumb_x) {
+        const mouse_delta_x = ctx.input.getMouse().pos.x - state.drag_start_mouse_x;
+        const scroll_ratio = if (viewport_width > 0) options.total_content_dims.w / viewport_width else 1.0;
+        state.scroll_offset.x = state.drag_start_scroll_x + (mouse_delta_x * scroll_ratio);
     } else if (cl.pointerOver(id)) {
         const mouse_wheel = ctx.input.getMouse().wheel_move;
         if (v_scroll_needed) {
@@ -134,6 +170,11 @@ pub fn useScrollContainer(
     if (v_scroll_needed) {
         const max_scroll = options.total_content_dims.h - viewport_height;
         state.scroll_offset.y = std.math.clamp(state.scroll_offset.y, 0, max_scroll);
+
+        // Debug logging for glitch investigation
+        // if (state.scroll_offset.y > max_scroll - 100) {
+        //    std.log.debug("ScrollY: {d:.2}, Max: {d:.2}, ViewH: {d:.2}, TotalH: {d:.2}", .{state.scroll_offset.y, max_scroll, viewport_height, options.total_content_dims.h});
+        // }
     }
     if (h_scroll_needed) {
         const max_scroll = options.total_content_dims.w - viewport_width;
@@ -153,6 +194,7 @@ pub fn useScrollContainer(
         layout.top_spacer_height = @as(f32, @floatFromInt(layout.first_visible_item)) * options.item_height;
         const total_items_f: f32 = options.total_content_dims.h / options.item_height;
         layout.bottom_spacer_height = (total_items_f - @as(f32, @floatFromInt(layout.last_visible_item))) * options.item_height;
+        if (layout.bottom_spacer_height < 0) layout.bottom_spacer_height = 0;
     } else {
         // If not virtualizing (the content fits), we show all items.
         // We have to calculate the total amout of items because we dont have access to the caller of this hook (as thus we dont know how many items there are)
@@ -169,7 +211,13 @@ pub fn useScrollContainer(
         layout.v_scrollbar.thumb_axis = scroll_ratio * max_thumb_y;
     }
 
-    // TODO: Horizontal scrollbar render data
+    // Horizontal scrollbar render data
+    if (h_scroll_needed) {
+        layout.h_scrollbar.thumb_size = @max(20, viewport_width * (viewport_width / options.total_content_dims.w));
+        const max_thumb_x = viewport_width - layout.h_scrollbar.thumb_size;
+        const scroll_ratio = if (options.total_content_dims.w > viewport_width) state.scroll_offset.x / (options.total_content_dims.w - viewport_width) else 0;
+        layout.h_scrollbar.thumb_axis = scroll_ratio * max_thumb_x;
+    }
 
     return layout;
 }
