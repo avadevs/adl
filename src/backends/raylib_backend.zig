@@ -13,9 +13,17 @@ const InputBackend = adl.ui.input.InputBackend;
 // Global font storage for the backend
 pub var fonts: [16]?rl.Font = @splat(null);
 
+// Global scale factor for implicit scaling
+pub var scale_factor: f32 = 1.0;
+
+pub fn getScaledMousePosition() rl.Vector2 {
+    const pos = rl.getMousePosition();
+    return .{ .x = pos.x / scale_factor, .y = pos.y / scale_factor };
+}
+
 fn getMousePosition(_: *anyopaque) types.Vector2 {
     const pos = rl.getMousePosition();
-    return .{ .x = pos.x, .y = pos.y };
+    return .{ .x = pos.x / scale_factor, .y = pos.y / scale_factor };
 }
 
 fn getMouseWheelMove(_: *anyopaque) types.Vector2 {
@@ -326,18 +334,29 @@ pub fn measureText(text: []const u8, config: *cl.TextElementConfig, _: void) cl.
     buf[text.len] = 0;
     const c_text = buf[0..text.len :0];
 
-    const size = rl.measureTextEx(font, c_text, @floatFromInt(config.font_size), @floatFromInt(config.letter_spacing));
-    return .{ .w = size.x, .h = size.y };
+    // Scale font size and spacing for measurement
+    const scaled_size = @as(f32, @floatFromInt(config.font_size)) * scale_factor;
+    const scaled_spacing = @as(f32, @floatFromInt(config.letter_spacing)) * scale_factor;
+
+    const size = rl.measureTextEx(font, c_text, scaled_size, scaled_spacing);
+    return .{ .w = size.x / scale_factor, .h = size.y / scale_factor };
 }
 
 pub fn render(commands: []cl.RenderCommand) void {
     for (commands) |cmd| {
-        const bbox = cmd.bounding_box;
+        var bbox = cmd.bounding_box;
+        // Apply scaling to bbox
+        bbox.x *= scale_factor;
+        bbox.y *= scale_factor;
+        bbox.width *= scale_factor;
+        bbox.height *= scale_factor;
+
         switch (cmd.command_type) {
             .rectangle => {
                 const config = cmd.render_data.rectangle;
                 if (config.corner_radius.top_left > 0) {
-                    rl.drawRectangleRounded(.{ .x = bbox.x, .y = bbox.y, .width = bbox.width, .height = bbox.height }, config.corner_radius.top_left / @min(bbox.width, bbox.height), 8, toRlColor(config.background_color));
+                    const scaled_radius = config.corner_radius.top_left * scale_factor;
+                    rl.drawRectangleRounded(.{ .x = bbox.x, .y = bbox.y, .width = bbox.width, .height = bbox.height }, scaled_radius / @min(bbox.width, bbox.height), 8, toRlColor(config.background_color));
                 } else {
                     rl.drawRectangle(
                         @intFromFloat(bbox.x),
@@ -361,7 +380,10 @@ pub fn render(commands: []cl.RenderCommand) void {
                     const c_text = buf[0..text.len :0];
 
                     const font = fonts[config.font_id] orelse rl.getFontDefault() catch continue;
-                    rl.drawTextEx(font, c_text, .{ .x = bbox.x, .y = bbox.y }, @floatFromInt(config.font_size), @floatFromInt(config.letter_spacing), toRlColor(config.text_color));
+                    const scaled_size = @as(f32, @floatFromInt(config.font_size)) * scale_factor;
+                    const scaled_spacing = @as(f32, @floatFromInt(config.letter_spacing)) * scale_factor;
+
+                    rl.drawTextEx(font, c_text, .{ .x = bbox.x, .y = bbox.y }, scaled_size, scaled_spacing, toRlColor(config.text_color));
                 }
             },
             .image => {
@@ -391,7 +413,31 @@ pub fn render(commands: []cl.RenderCommand) void {
             .border => {
                 const config = cmd.render_data.border;
                 const color = toRlColor(config.color);
-                const corners = config.corner_radius;
+
+                // Scale config values
+                const corners = struct {
+                    top_left: f32,
+                    top_right: f32,
+                    bottom_left: f32,
+                    bottom_right: f32,
+                }{
+                    .top_left = config.corner_radius.top_left * scale_factor,
+                    .top_right = config.corner_radius.top_right * scale_factor,
+                    .bottom_left = config.corner_radius.bottom_left * scale_factor,
+                    .bottom_right = config.corner_radius.bottom_right * scale_factor,
+                };
+
+                const widths = struct {
+                    left: f32,
+                    right: f32,
+                    top: f32,
+                    bottom: f32,
+                }{
+                    .left = @as(f32, @floatFromInt(config.width.left)) * scale_factor,
+                    .right = @as(f32, @floatFromInt(config.width.right)) * scale_factor,
+                    .top = @as(f32, @floatFromInt(config.width.top)) * scale_factor,
+                    .bottom = @as(f32, @floatFromInt(config.width.bottom)) * scale_factor,
+                };
 
                 // Helper to draw a rectangle
                 const drawRect = struct {
@@ -405,7 +451,7 @@ pub fn render(commands: []cl.RenderCommand) void {
                     drawRect(
                         bbox.x,
                         bbox.y + corners.top_left,
-                        @floatFromInt(config.width.left),
+                        widths.left,
                         bbox.height - corners.top_left - corners.bottom_left,
                         color,
                     );
@@ -414,9 +460,9 @@ pub fn render(commands: []cl.RenderCommand) void {
                 // Right
                 if (config.width.right > 0) {
                     drawRect(
-                        bbox.x + bbox.width - @as(f32, @floatFromInt(config.width.right)),
+                        bbox.x + bbox.width - widths.right,
                         bbox.y + corners.top_right,
-                        @floatFromInt(config.width.right),
+                        widths.right,
                         bbox.height - corners.top_right - corners.bottom_right,
                         color,
                     );
@@ -428,7 +474,7 @@ pub fn render(commands: []cl.RenderCommand) void {
                         bbox.x + corners.top_left,
                         bbox.y,
                         bbox.width - corners.top_left - corners.top_right,
-                        @floatFromInt(config.width.top),
+                        widths.top,
                         color,
                     );
                 }
@@ -437,9 +483,9 @@ pub fn render(commands: []cl.RenderCommand) void {
                 if (config.width.bottom > 0) {
                     drawRect(
                         bbox.x + corners.bottom_left,
-                        bbox.y + bbox.height - @as(f32, @floatFromInt(config.width.bottom)),
+                        bbox.y + bbox.height - widths.bottom,
                         bbox.width - corners.bottom_left - corners.bottom_right,
-                        @floatFromInt(config.width.bottom),
+                        widths.bottom,
                         color,
                     );
                 }
@@ -456,7 +502,7 @@ pub fn render(commands: []cl.RenderCommand) void {
                 if (corners.top_left > 0) {
                     drawCorner(
                         rl.Vector2{ .x = bbox.x + corners.top_left, .y = bbox.y + corners.top_left },
-                        corners.top_left - @as(f32, @floatFromInt(config.width.top)),
+                        corners.top_left - widths.top,
                         corners.top_left,
                         180,
                         270,
@@ -468,7 +514,7 @@ pub fn render(commands: []cl.RenderCommand) void {
                 if (corners.top_right > 0) {
                     drawCorner(
                         rl.Vector2{ .x = bbox.x + bbox.width - corners.top_right, .y = bbox.y + corners.top_right },
-                        corners.top_right - @as(f32, @floatFromInt(config.width.top)),
+                        corners.top_right - widths.top,
                         corners.top_right,
                         270,
                         360,
@@ -480,7 +526,7 @@ pub fn render(commands: []cl.RenderCommand) void {
                 if (corners.bottom_left > 0) {
                     drawCorner(
                         rl.Vector2{ .x = bbox.x + corners.bottom_left, .y = bbox.y + bbox.height - corners.bottom_left },
-                        corners.bottom_left - @as(f32, @floatFromInt(config.width.bottom)),
+                        corners.bottom_left - widths.bottom,
                         corners.bottom_left,
                         90,
                         180,
@@ -492,9 +538,9 @@ pub fn render(commands: []cl.RenderCommand) void {
                 if (corners.bottom_right > 0) {
                     drawCorner(
                         rl.Vector2{ .x = bbox.x + bbox.width - corners.bottom_right, .y = bbox.y + bbox.height - corners.bottom_right },
-                        corners.bottom_right - @as(f32, @floatFromInt(config.width.bottom)),
+                        corners.bottom_right - widths.bottom,
                         corners.bottom_right,
-                        0.1,
+                        0,
                         90,
                         color,
                     );

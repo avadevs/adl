@@ -100,18 +100,16 @@ const HomeScreen = struct {
             });
 
             // Example: Scroll Area
-            try ui.scrollArea("scroll_area", .{ .content_height = 200 }, struct {
-                fn render() void {
-                    cl.text("I am inside a scroll area!", .{ .font_size = 20, .color = .{ 255, 255, 255, 255 } });
-                    cl.text("Me too!", .{ .font_size = 20, .color = .{ 200, 200, 200, 255 } });
-                    cl.text("Me three!", .{ .font_size = 20, .color = .{ 150, 150, 150, 255 } });
-                    cl.text("Me four!", .{ .font_size = 20, .color = .{ 100, 100, 100, 255 } });
-                    cl.text("Me five!", .{ .font_size = 20, .color = .{ 50, 50, 50, 255 } });
-                    cl.text("Me six!", .{ .font_size = 20, .color = .{ 100, 100, 100, 255 } });
-                    cl.text("Me seven!", .{ .font_size = 20, .color = .{ 150, 150, 150, 255 } });
-                    cl.text("Me eight!", .{ .font_size = 20, .color = .{ 200, 200, 200, 255 } });
-                }
-            }.render);
+            const sa = try ui.scrollArea("scroll_area", .{ .content_height = 200 });
+            cl.text("I am inside a scroll area!", .{ .font_size = 20, .color = .{ 255, 255, 255, 255 } });
+            cl.text("Me too!", .{ .font_size = 20, .color = .{ 200, 200, 200, 255 } });
+            cl.text("Me three!", .{ .font_size = 20, .color = .{ 150, 150, 150, 255 } });
+            cl.text("Me four!", .{ .font_size = 20, .color = .{ 100, 100, 100, 255 } });
+            cl.text("Me five!", .{ .font_size = 20, .color = .{ 50, 50, 50, 255 } });
+            cl.text("Me six!", .{ .font_size = 20, .color = .{ 100, 100, 100, 255 } });
+            cl.text("Me seven!", .{ .font_size = 20, .color = .{ 150, 150, 150, 255 } });
+            cl.text("Me eight!", .{ .font_size = 20, .color = .{ 200, 200, 200, 255 } });
+            sa.end();
 
             // Render buttons normally
             if (try ui.button("btn_inc", .{ .text = "Increment Counter", .variant = .primary })) {
@@ -200,10 +198,15 @@ pub fn main() !void {
     defer frame_arena.deinit();
 
     // Init Raylib
-    rl.setConfigFlags(rl.ConfigFlags{ .window_resizable = true, .msaa_4x_hint = true });
+    rl.setConfigFlags(rl.ConfigFlags{ .window_resizable = true, .msaa_4x_hint = true, .window_highdpi = true });
     rl.initWindow(800, 600, "ADL Basic Example");
     rl.setTargetFPS(60);
     defer rl.closeWindow();
+
+    // Set implicit scale factor from OS
+    const scale = rl.getWindowScaleDPI();
+    adl_rl.scale_factor = scale.x;
+    std.log.info("UI Scale Factor: {d}", .{adl_rl.scale_factor});
 
     std.log.info("System initialized. Starting loop...", .{});
 
@@ -220,10 +223,10 @@ pub fn main() !void {
         // Update Layout Dimensions
         const screen_width = @as(f32, @floatFromInt(rl.getScreenWidth()));
         const screen_height = @as(f32, @floatFromInt(rl.getScreenHeight()));
-        cl.setLayoutDimensions(.{ .w = screen_width, .h = screen_height });
+        cl.setLayoutDimensions(.{ .w = screen_width / adl_rl.scale_factor, .h = screen_height / adl_rl.scale_factor });
 
         // Update Inputs
-        const mouse_pos = rl.getMousePosition();
+        const mouse_pos = adl_rl.getScaledMousePosition();
         cl.setPointerState(.{ .x = mouse_pos.x, .y = mouse_pos.y }, rl.isMouseButtonDown(.left));
 
         const wheel_delta = rl.getMouseWheelMoveV();
