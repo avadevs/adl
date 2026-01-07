@@ -20,7 +20,8 @@ Primitives handle **logic, input, and structural layout**. They **never** access
 ### Pattern
 -   **Config Struct**: Plain Old Data (POD) for every possible visual property (colors, padding, sizing).
 -   **Return Value**: Interaction state (`clicked`, `hovered`, `active`).
--   **Logic**: Handles `ctx.input`, `ctx.registerFocusable`, `ctx.active_id`.
+-   **Logic**: Handles `ctx.input`, `ctx.active_id`.
+-   **Focus**: MUST implement focus handling if interactive. Call `ctx.registerFocusable(id)` to participate in tab navigation (see `src/ui/core/context.zig`). Check `ctx.focused_id` to determine focus state.
 
 ```zig
 // src/ui/primitives/my_widget.zig
@@ -63,7 +64,7 @@ Components handle **theming and high-level API**. They map user intention (Varia
 -   **Logic**:
     1.  Determine context (is it hovered? active?).
     2.  Resolve colors from `ctx.theme` based on state & variant.
-    3.  Call the Primitive.
+    3.  Call the Primitive. (If no primitive is applicable, handle focus here: `ctx.registerFocusable(id)`).
 
 ```zig
 // src/ui/components/my_widget.zig
@@ -105,6 +106,7 @@ pub fn render(id_str: []const u8, opts: Options) !bool {
 
 ## 3. Checklist
 1.  [ ] **Primitive**: Does it take raw `cl.Color`? (Yes = Good). Does it import `theme`? (Yes = **BAD**).
-2.  [ ] **Component**: Does it contain complex input logic? (Yes = **BAD** -> Move to Primitive).
-3.  [ ] **State**: If stateful, does the Primitive use `ctx.getWidgetState`?
-4.  [ ] **Exports**: Export component in `src/ui/ui.zig`.
+2.  [ ] **Focus**: Does the primitive call `ctx.registerFocusable` if it's interactive?
+3.  [ ] **Component**: Does it contain complex input logic? (Yes = **BAD** -> Move to Primitive).
+4.  [ ] **State**: If stateful, does the Primitive use `ctx.getWidgetState`?
+5.  [ ] **Exports**: Export component in `src/ui/ui.zig`.
