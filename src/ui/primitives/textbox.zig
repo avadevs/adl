@@ -9,22 +9,22 @@ pub const PrimitiveTextboxConfig = struct {
     id: cl.ElementId,
     state_id: u64, // Stable ID for state persistence
     text: *std.ArrayList(u8),
-    
+
     // Sizing & Layout
     sizing: cl.Sizing = .{ .w = .grow, .h = .fixed(40) },
     padding: cl.Padding = .{ .left = 8, .right = 8 },
     font_size: u16 = 20,
-    
+
     // Styling
     background_color: cl.Color,
     border: cl.BorderElementConfig = .{},
     corner_radius: cl.CornerRadius = .{},
-    
+
     // Content Styling
     text_color: cl.Color,
     placeholder_color: cl.Color,
     cursor_color: cl.Color,
-    
+
     placeholder: []const u8 = "...",
 };
 

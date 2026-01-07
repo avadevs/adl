@@ -33,6 +33,7 @@ const checkbox_mod = @import("components/checkbox.zig");
 const toggle_mod = @import("components/toggle.zig");
 const textbox_mod = @import("components/textbox.zig");
 const slider_mod = @import("components/slider.zig");
+const badge_mod = @import("components/badge.zig");
 const scrollbar_mod = @import("elements/scrollbar.zig");
 
 const scroll_list_mod = @import("components/scroll_list.zig");
@@ -45,6 +46,7 @@ pub const checkbox_elem = checkbox_mod;
 pub const toggle_elem = toggle_mod;
 pub const textbox_elem = textbox_mod;
 pub const slider_elem = slider_mod;
+pub const badge_elem = badge_mod;
 pub const scrollbar_elem = scrollbar_mod;
 pub const scrollList = scroll_list_mod;
 pub const scrollTable = scroll_table_mod;
@@ -89,6 +91,13 @@ pub const UI = struct {
         const ctx = try context.UIContext.getCurrent();
         const id = cl.ElementId.ID(id_str);
         return slider_mod.render(ctx, id, value, options);
+    }
+
+    /// Renders a badge.
+    pub fn badge(id_str: []const u8, options: badge_mod.Options) !void {
+        const ctx = try context.UIContext.getCurrent();
+        const id = cl.ElementId.ID(id_str);
+        badge_mod.render(ctx, id, options);
     }
 
     /// Renders a generic scrollable area.
@@ -144,6 +153,7 @@ pub const checkbox = UI.checkbox;
 pub const toggle = UI.toggle;
 pub const textbox = UI.textbox;
 pub const slider = UI.slider;
+pub const badge = UI.badge;
 pub const scrollArea = UI.scrollArea;
 pub const beginList = UI.beginList;
 pub const endList = UI.endList;

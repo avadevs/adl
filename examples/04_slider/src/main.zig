@@ -51,23 +51,19 @@ const SliderScreen = struct {
         const ui = adl.ui;
         const state = g_ctx.store.getCopy();
 
-        cl.UI()(.{ 
-            .id = cl.ElementId.ID("Root"), 
-            .layout = .{ 
-                .sizing = .grow, 
-                .direction = .top_to_bottom,
-                .padding = .all(40),
-                .child_gap = 20,
-            }, 
-            .background_color = .{ 30, 30, 30, 255 } 
-        })({
+        cl.UI()(.{ .id = cl.ElementId.ID("Root"), .layout = .{
+            .sizing = .grow,
+            .direction = .top_to_bottom,
+            .padding = .all(40),
+            .child_gap = 20,
+        }, .background_color = .{ 30, 30, 30, 255 } })({
             cl.text("Slider Component Demo", .{ .font_size = 32, .color = .{ 255, 255, 255, 255 } });
-            
+
             // 1. Basic Opacity Slider (0.0 - 1.0)
             cl.UI()(.{ .layout = .{ .direction = .top_to_bottom, .child_gap = 8 } })({
                 const label = std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Opacity: {d:.2}", .{state.opacity}) catch "err";
                 cl.text(label, .{ .font_size = 18, .color = .{ 200, 200, 200, 255 } });
-                
+
                 var op = state.opacity;
                 if (try ui.slider("slider_opacity", &op, .{ .min = 0.0, .max = 1.0 })) {
                     const guard = g_ctx.store.write();
@@ -80,7 +76,7 @@ const SliderScreen = struct {
             cl.UI()(.{ .layout = .{ .direction = .top_to_bottom, .child_gap = 8 } })({
                 const label = std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Volume: {d:.0}%", .{state.volume}) catch "err";
                 cl.text(label, .{ .font_size = 18, .color = .{ 200, 200, 200, 255 } });
-                
+
                 var vol = state.volume;
                 if (try ui.slider("slider_volume", &vol, .{ .min = 0, .max = 100 })) {
                     const guard = g_ctx.store.write();
@@ -93,10 +89,10 @@ const SliderScreen = struct {
             cl.UI()(.{ .layout = .{ .direction = .top_to_bottom, .child_gap = 8 } })({
                 const label = std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Rating: {d:.0}/10", .{state.rating}) catch "err";
                 cl.text(label, .{ .font_size = 18, .color = .{ 200, 200, 200, 255 } });
-                
+
                 var rat = state.rating;
                 if (try ui.slider("slider_rating", &rat, .{ .min = 1, .max = 10, .step = 1 })) {
-                     const guard = g_ctx.store.write();
+                    const guard = g_ctx.store.write();
                     defer guard.release();
                     guard.state.rating = rat;
                 }
@@ -105,15 +101,15 @@ const SliderScreen = struct {
             // 4. Disabled Slider
             cl.UI()(.{ .layout = .{ .direction = .top_to_bottom, .child_gap = 8 } })({
                 cl.text("Disabled (Read Only)", .{ .font_size = 18, .color = .{ 150, 150, 150, 255 } });
-                
+
                 var ro = state.read_only_val;
                 _ = try ui.slider("slider_disabled", &ro, .{ .disabled = true });
             });
-            
-             // 5. Custom Width
+
+            // 5. Custom Width
             cl.UI()(.{ .layout = .{ .direction = .top_to_bottom, .child_gap = 8 } })({
                 cl.text("Custom Width (Fixed 200px)", .{ .font_size = 18, .color = .{ 200, 200, 200, 255 } });
-                
+
                 var op = state.opacity;
                 if (try ui.slider("slider_width", &op, .{ .width = .fixed(200) })) {
                     const guard = g_ctx.store.write();
@@ -121,7 +117,6 @@ const SliderScreen = struct {
                     guard.state.opacity = op;
                 }
             });
-
         });
     }
 };
@@ -184,7 +179,7 @@ pub fn main() !void {
 
     // Navigate to home
     try router.navigate(&ui_ctx, "/");
-    
+
     while (!rl.windowShouldClose()) {
         const delta_time = rl.getFrameTime();
 
@@ -207,11 +202,11 @@ pub fn main() !void {
 
         // --- Clay Layout Phase ---
         cl.beginLayout();
-        
+
         router.render(&ui_ctx) catch |err| {
             std.log.err("Render error: {}", .{err});
         };
-        
+
         const commands = cl.endLayout();
         // -------------------------
 

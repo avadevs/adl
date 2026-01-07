@@ -96,6 +96,17 @@ const HomeScreen = struct {
 
             cl.text(std.fmt.allocPrint(g_ctx.ui.frame_allocator, "Last Job Result: {}", .{state.last_job_result}) catch "Result: ?", .{ .font_size = 24, .color = .{ 150, 150, 150, 255 } });
 
+            // Example: Badge
+            {
+                const row = cl.UI()(.{ .layout = .{ .direction = .left_to_right, .child_gap = 10 } });
+                defer row({});
+                try ui.badge("b_new", .{ .text = "New", .variant = .success, .size = .md });
+                try ui.badge("b_tag", .{ .text = "v1.0.0", .variant = .outline, .size = .sm });
+                if (state.loading) {
+                    try ui.badge("b_loading", .{ .text = "Processing", .variant = .warning, .size = .md });
+                }
+            }
+
             // Example: Checkbox
             if (try ui.checkbox("cb_details", .{ .checked = state.show_details, .label = "Show Details" })) {
                 const guard = g_ctx.store.write();

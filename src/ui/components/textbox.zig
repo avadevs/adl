@@ -24,7 +24,7 @@ pub fn render(id_str: []const u8, text: *std.ArrayList(u8), options: Options) !v
     // Determine colors
     const border_color = if (is_focused) theme.color_primary else theme.color_base_300;
     const bg_color = if (is_hovered) theme.color_base_200 else theme.color_base_100;
-    
+
     var placeholder_color = theme.color_base_content;
     placeholder_color[3] = 150; // Make it semi-transparent
 
@@ -32,19 +32,19 @@ pub fn render(id_str: []const u8, text: *std.ArrayList(u8), options: Options) !v
         .id = id,
         .state_id = id_hash,
         .text = text,
-        
+
         .sizing = .{ .w = .grow, .h = .fixed(40) },
         .padding = .{ .left = 8, .right = 8 },
         .font_size = options.font_size,
-        
+
         .background_color = bg_color,
         .border = .{ .width = .all(theme.border), .color = border_color },
         .corner_radius = .all(theme.radius_field),
-        
+
         .text_color = theme.color_base_content,
         .placeholder_color = placeholder_color,
         .cursor_color = theme.color_primary,
-        
+
         .placeholder = options.placeholder,
     };
 
