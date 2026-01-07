@@ -39,6 +39,8 @@ const scrollbar_mod = @import("elements/scrollbar.zig");
 const scroll_list_mod = @import("components/scroll_list.zig");
 const scroll_table_mod = @import("components/scroll_table.zig");
 const scroll_area_mod = @import("components/scroll_area.zig");
+const select_mod = @import("components/select.zig");
+const multi_select_mod = @import("components/multi_select.zig");
 
 // Public exports
 pub const button_elem = button_mod;
@@ -51,6 +53,9 @@ pub const scrollbar_elem = scrollbar_mod;
 pub const scrollList = scroll_list_mod;
 pub const scrollTable = scroll_table_mod;
 pub const scroll_area_elem = scroll_area_mod;
+pub const Select = select_mod.Select;
+pub const MultiSelect = multi_select_mod.MultiSelect;
+pub const DropdownMenu = @import("components/dropdown_menu.zig").DropdownMenu;
 
 // Types export
 pub const TableColumn = scroll_table_mod.Column;

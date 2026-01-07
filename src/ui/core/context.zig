@@ -220,12 +220,25 @@ pub const UIContext = struct {
         const state_map = scope_map_result.value_ptr;
         const entry = state_map.getOrPut(id) catch return ContextError.OutOfMemory;
 
+        // Generate cleanup function and Unique Type ID
+        const Gen = struct {
+            var dummy: u8 = 0;
+            fn deinit_impl(raw: *anyopaque, alloc: std.mem.Allocator) void {
+                const self_ptr: *T = @ptrCast(@alignCast(raw));
+                if (@hasDecl(T, "deinit")) {
+                    self_ptr.deinit();
+                }
+                alloc.destroy(self_ptr);
+            }
+        };
+        const type_id = @intFromPtr(&Gen.dummy);
+
         // Verification & Initialization
         if (entry.found_existing) {
             if (entry.value_ptr.* == .custom) {
                 const wrapper = entry.value_ptr.custom;
                 // Type safety check
-                if (wrapper.type_id == @intFromPtr(T)) {
+                if (wrapper.type_id == type_id) {
                     return @ptrCast(@alignCast(wrapper.data));
                 }
             }
@@ -237,21 +250,10 @@ pub const UIContext = struct {
         const ptr = self.allocator.create(T) catch return ContextError.OutOfMemory;
         ptr.* = T{}; // Default init
 
-        // Generate cleanup function
-        const gen = struct {
-            fn deinit_impl(raw: *anyopaque, alloc: std.mem.Allocator) void {
-                const self_ptr: *T = @ptrCast(@alignCast(raw));
-                if (@hasDecl(T, "deinit")) {
-                    self_ptr.deinit();
-                }
-                alloc.destroy(self_ptr);
-            }
-        };
-
         entry.value_ptr.* = .{ .custom = .{
             .data = ptr,
-            .type_id = @intFromPtr(T),
-            .deinit_fn = gen.deinit_impl,
+            .type_id = type_id,
+            .deinit_fn = Gen.deinit_impl,
         } };
 
         return ptr;
